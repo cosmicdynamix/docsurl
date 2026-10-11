@@ -91,6 +91,8 @@ export interface ViewerOpts {
   pages: { width: number; height: number }[];
   exp: number;
   sig: string;
+  /** Signed download URL; present only when the link owner allowed downloads. */
+  downloadUrl?: string | null;
   ogImage: string | null;
   pageUrl: string;
   viewId: number;
@@ -119,6 +121,7 @@ ${o.ogImage ? `<meta property="og:image" content="${esc(o.ogImage)}">` : ''}`;
 .pg{position:relative;width:100%;margin:0 0 10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;overflow:hidden}
 .pg img{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none;-webkit-user-drag:none;-webkit-touch-callout:none;user-select:none;opacity:0;transition:opacity .25s}
 .pg img.ok{opacity:1}
+.dl{flex:none;color:var(--text);text-decoration:none;border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:.85rem;font-weight:600;background:var(--surface);white-space:nowrap}
 .ind{position:fixed;left:50%;bottom:calc(14px + env(safe-area-inset-bottom));transform:translateX(-50%);background:color-mix(in srgb,var(--surface) 92%,transparent);backdrop-filter:blur(8px);border:1px solid var(--border);border-radius:999px;padding:6px 14px;font-size:.85rem;font-variant-numeric:tabular-nums}
 @media print{body{display:none}}`;
   const js = `
@@ -152,7 +155,7 @@ ${o.ogImage ? `<meta property="og:image" content="${esc(o.ogImage)}">` : ''}`;
     nonce: o.nonce,
     head: og,
     body: `<style nonce="${o.nonce}">${css}</style><div hidden id="trk" data-vid="${o.viewId}" data-vt="${o.viewToken}"></div>
-<div class="bar">${logos()}<span class="nm">${esc(getBranding().siteName)}</span><span class="t">${esc(o.title)}</span></div>
+<div class="bar">${logos()}<span class="nm">${esc(getBranding().siteName)}</span><span class="t">${esc(o.title)}</span>${o.downloadUrl ? `<a class="dl" href="${esc(o.downloadUrl)}" download>Download PDF</a>` : ''}</div>
 <div class="pgs">${pages}</div><div class="ind" id="ind"></div>
 <script nonce="${o.nonce}">${js}</script>`,
   });

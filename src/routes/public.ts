@@ -11,7 +11,8 @@ import { pool } from '../db.js';
 import { verifyPassword } from '../passwords.js';
 import { slugSchema } from '../slug.js';
 import { parseUA } from '../ua.js';
-import { type Variant, ogPath, pagePath } from '../storage.js';
+import { imagesToPdf } from '../imagepdf.js';
+import { type Variant, ogPath, originalPath, pagePath } from '../storage.js';
 import { notFoundPage, unlockPage, viewerPage } from '../viewer.js';
 import { baseUrl } from './links.js';
 
@@ -31,6 +32,7 @@ const accessCookie = (linkId: string): string => `docs_acc_${linkId.slice(0, 8)}
 const accessSig = (l: { id: string; password_hash: string }, exp: number): string =>
   hmac(`acc:${l.id}:${l.password_hash.slice(-16)}:${exp}`);
 const imgSig = (linkId: string, versionNo: number, variant: Variant, exp: number): string => hmac(`img:${linkId}:${versionNo}:${variant}:${exp}`);
+const dlSig = (linkId: string, versionNo: number, variant: Variant, exp: number): string => hmac(`dl:${linkId}:${versionNo}:${variant}:${exp}`);
 
 // Wrong-password throttle: 8 failures / 15 min per ip+slug.
 const unlockFails = new Map<string, { n: number; until: number }>();
@@ -54,12 +56,13 @@ interface PublicLink {
   owner_id: string;
   version_id: string | null;
   version_no: number | null;
+  allow_download: boolean;
   active: boolean;
 }
 
 async function findLink(slug: string): Promise<PublicLink | null> {
   const { rows } = await pool.query<PublicLink>(
-    `select l.id, l.slug, l.kind, l.title, l.destination_url, l.password_hash, l.owner_id,
+    `select l.id, l.slug, l.kind, l.title, l.destination_url, l.password_hash, l.owner_id, l.allow_download,
             cv.id as version_id, cv.version_no,
             (l.status = 'active'
              and (l.expires_at is null or l.expires_at > now())
@@ -258,6 +261,48 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // Optional PDF download (only when the link owner enabled it). Stamped documents are downloaded as the stamped pages.
+  app.get('/_d/:linkId/:ver/:variant', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const p = z.object({ linkId: z.string().uuid(), ver: z.coerce.number().int().positive(), variant: z.enum(['desktop', 'mobile']) }).safeParse(req.params);
+    const q = z.object({ e: z.coerce.number().int(), t: z.string(), v: z.coerce.number().int().optional() }).safeParse(req.query);
+    if (!p.success || !q.success) return reply.code(404).send();
+    if (q.data.e < Date.now() / 1000 || !safeEq(q.data.t, dlSig(p.data.linkId, p.data.ver, p.data.variant, q.data.e))) return reply.code(403).send();
+    const { rows } = await pool.query<{ title: string; recipient: string | null; stamp: boolean }>(
+      `select l.title, l.recipient, l.stamp from links l
+        where l.id = $1 and l.kind = 'file' and l.allow_download and l.status = 'active'
+          and (l.expires_at is null or l.expires_at > now())`,
+      [p.data.linkId],
+    );
+    const link = rows[0];
+    if (!link) return reply.code(404).send();
+    const name = `${link.title.replace(/[^\w.\- ]+/g, '').trim().slice(0, 80) || 'document'}.pdf`;
+    const stamped = !!link.recipient && link.stamp;
+    let body: Buffer | ReturnType<typeof createReadStream>;
+    try {
+      if (stamped) {
+        const pgs = await pool.query<{ page_no: number }>(
+          `select lp.page_no from link_pages lp join link_versions lv on lv.id = lp.version_id
+            where lv.link_id = $1 and lv.version_no = $2 and lp.variant = $3 order by lp.page_no`,
+          [p.data.linkId, p.data.ver, p.data.variant],
+        );
+        if (!pgs.rowCount) return reply.code(404).send();
+        body = await imagesToPdf(pgs.rows.map((r) => ({ file: pagePath(p.data.linkId, p.data.ver, r.page_no, p.data.variant) })));
+      } else {
+        await access(originalPath(p.data.linkId, p.data.ver, p.data.variant));
+        body = createReadStream(originalPath(p.data.linkId, p.data.ver, p.data.variant));
+      }
+    } catch {
+      return reply.code(404).send();
+    }
+    if (q.data.v) await pool.query('update views set downloads = downloads + 1 where id = $1 and link_id = $2', [q.data.v, p.data.linkId]);
+    return reply
+      .header('Cache-Control', 'private, no-store')
+      .header('Content-Disposition', `attachment; filename="${name}"`)
+      .header('X-Content-Type-Options', 'nosniff')
+      .type('application/pdf')
+      .send(body);
+  });
+
   app.post('/:slug/unlock', async (req, reply) => {
     const nonce = randomBytes(16).toString('base64');
     csp(reply, nonce);
@@ -338,6 +383,7 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
         exp,
         variant,
         sig: imgSig(link.id, link.version_no, variant, exp),
+        downloadUrl: link.allow_download ? `/_d/${link.id}/${link.version_no}/${variant}?e=${exp}&t=${dlSig(link.id, link.version_no, variant, exp)}&v=${viewId}` : null,
         viewId,
         viewToken: trkSig(viewId),
         ogImage: link.password_hash ? null : `${base}/_og/${link.slug}.jpg`,

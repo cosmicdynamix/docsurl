@@ -44,8 +44,8 @@ const VISITOR = 'coalesce(v.visitor_id, v.ip_hash)';
 const BASE_Q = 'v.link_id = $1 and v.started_at >= $2 and v.started_at < $3 and ($4::bool or not v.is_bot) and ($5::bool or not v.is_owner_preview)';
 
 async function accessibleLink(req: FastifyRequest, reply: FastifyReply, id: string) {
-  const { rows } = await pool.query<{ id: string; kind: string; owner_id: string; current_version_id: string | null; created_at: Date; title: string; slug: string }>(
-    'select id, kind, owner_id, current_version_id, created_at, title, slug from links where id = $1',
+  const { rows } = await pool.query<{ id: string; kind: string; owner_id: string; current_version_id: string | null; created_at: Date; title: string; slug: string; recipient: string | null }>(
+    'select id, kind, owner_id, current_version_id, created_at, title, slug, recipient from links where id = $1',
     [id],
   );
   const link = rows[0];
@@ -79,7 +79,7 @@ const SESSION_COLS = `s.id, s.started_at as "startedAt", s.country, s.region, s.
   s.os, s.os_ver as "osVer", s.device_type as device, s.in_app as "inApp", s.referrer_url as "referrerUrl",
   s.referrer_host as "referrerHost", s.src_tag as "srcTag", s.active_ms as "activeMs", s.open_ms as "openMs",
   s.max_page as "maxPage", s.top_dwell_page as "topPage", s.is_bot as "isBot", s.is_owner_preview as "isOwner",
-  s.page_count as "pageCount", s.lang, s.visitor, s.visit_no as "visitNo", s.variant`;
+  s.page_count as "pageCount", s.lang, s.visitor, s.visit_no as "visitNo", s.variant, s.downloads`;
 
 const sessionsSql = (extra = ""): string => `
   select ${SESSION_COLS} from (
@@ -256,7 +256,7 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
     if (!link) return;
     const { from, to } = bounds(q.data.range);
     const { rows } = await pool.query(sessionsSql(versionSql(q.data.version)), [link.id, from, to, q.data.bots === '1', q.data.owner === '1', 10000, 0]);
-    const cols = ['startedAt', 'visitor', 'visitNo', 'country', 'region', 'city', 'device', 'os', 'osVer', 'browser', 'browserVer', 'source', 'referrerUrl', 'srcTag', 'variant', 'activeMs', 'openMs', 'maxPage', 'pageCount', 'topPage', 'lang', 'isBot', 'isOwner'];
+    const cols = ['startedAt', 'visitor', 'visitNo', 'country', 'region', 'city', 'device', 'os', 'osVer', 'browser', 'browserVer', 'source', 'referrerUrl', 'srcTag', 'variant', 'downloads', 'activeMs', 'openMs', 'maxPage', 'pageCount', 'topPage', 'lang', 'isBot', 'isOwner'];
     const lines = [cols.join(',')];
     for (const r of (rows as SessionRow[]).map(withSource)) lines.push(cols.map((c) => csvCell((r as Record<string, unknown>)[c])).join(','));
     return reply
@@ -336,6 +336,7 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
     ]);
     if (!summary.rows[0] || !summary.rows[0].visits) return reply.code(404).send({ error: 'not_found' });
     return {
+      link: { id: link.id, title: link.title, slug: link.slug, recipient: link.recipient, kind: link.kind },
       summary: { ...summary.rows[0], avgDepth: Number(summary.rows[0].avgDepth) },
       pages: pages.rows,
       visits: (visits.rows as SessionRow[]).map(withSource),

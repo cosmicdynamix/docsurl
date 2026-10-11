@@ -54,7 +54,7 @@ const EFFECTIVE = `case when l.status = 'disabled' then 'disabled'
 const LINK_SELECT = `
   select l.id, l.slug, l.kind, l.title, l.status, l.destination_url as "destinationUrl",
          (l.password_hash is not null) as "hasPassword", l.expires_at as "expiresAt", l.max_views as "maxViews",
-         l.recipient, l.tags, l.stamp,
+         l.recipient, l.tags, l.stamp, l.allow_download as "allowDownload",
          l.created_at as "createdAt", l.updated_at as "updatedAt", l.owner_id as "ownerId", u.email as "ownerEmail",
          ${EFFECTIVE} as "effectiveStatus",
          (select count(*)::int from views v where v.link_id = l.id and not v.is_bot and not v.is_owner_preview) as views,
@@ -306,6 +306,7 @@ export async function linkRoutes(app: FastifyInstance): Promise<void> {
         password: linkPasswordSchema.optional(),
         recipient: recipientSchema,
         stamp: boolish,
+        allowDownload: boolish,
         tags: tagsSchema,
         expiresAt: optionalDate,
         maxViews: optionalMaxViews,
@@ -365,9 +366,9 @@ export async function linkRoutes(app: FastifyInstance): Promise<void> {
     try {
       await client.query('begin');
       await client.query(
-        `insert into links(id, owner_id, slug, kind, title, password_hash, expires_at, max_views, recipient, tags, stamp)
-         values ($1,$2,$3,'file',$4,$5,$6,$7,$8,$9,$10)`,
-        [linkId, req.user!.id, slug, d.title, pwHash, d.expiresAt ?? null, d.maxViews ?? null, d.recipient || null, d.tags ?? [], d.stamp !== false],
+        `insert into links(id, owner_id, slug, kind, title, password_hash, expires_at, max_views, recipient, tags, stamp, allow_download)
+         values ($1,$2,$3,'file',$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [linkId, req.user!.id, slug, d.title, pwHash, d.expiresAt ?? null, d.maxViews ?? null, d.recipient || null, d.tags ?? [], d.stamp !== false, d.allowDownload === true],
       );
       const versionId = randomUUID();
       const main = stored[0];
@@ -400,6 +401,7 @@ export async function linkRoutes(app: FastifyInstance): Promise<void> {
         title: z.string().trim().min(1).max(200).optional(),
         recipient: recipientSchema,
         stamp: boolish,
+        allowDownload: boolish,
         tags: tagsSchema,
         slug: slugSchema.optional(),
         status: z.enum(['active', 'disabled']).optional(),
@@ -425,6 +427,7 @@ export async function linkRoutes(app: FastifyInstance): Promise<void> {
     if (d.title !== undefined) set('title', d.title);
     if (d.recipient !== undefined) set('recipient', d.recipient || null);
     if (d.stamp !== undefined) set('stamp', d.stamp);
+    if (d.allowDownload !== undefined) set('allow_download', d.allowDownload);
     if (d.tags !== undefined) set('tags', d.tags);
     if (d.slug !== undefined) set('slug', d.slug);
     if (d.status !== undefined) set('status', d.status);

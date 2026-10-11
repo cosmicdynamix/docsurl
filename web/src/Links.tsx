@@ -10,6 +10,7 @@ export interface LinkItem {
   recipient: string | null;
   tags: string[];
   stamp: boolean;
+  allowDownload: boolean;
   status: 'active' | 'disabled';
   effectiveStatus: 'active' | 'disabled' | 'expired';
   destinationUrl: string | null;
@@ -158,6 +159,7 @@ export function LinksList({ admin }: { admin: boolean }) {
               <span>{l.kind === 'file' ? `PDF · ${plural(l.pageCount ?? 0, 'page')}${l.hasMobile ? ` + mobile ${plural(l.mobilePageCount ?? 0, 'page')}` : ''}` : 'Short URL'}</span>
               <span>· {plural(l.views, 'view')}</span>
               {l.hasPassword && <span>· 🔒 password</span>}
+              {l.allowDownload && <span>· download on</span>}
               {l.expiresAt && <span>· expires {fmtDate(l.expiresAt)}</span>}
               {admin && <span>· {l.ownerEmail}</span>}
             </div>
@@ -223,6 +225,8 @@ function WhoFields({
   suggestions,
   stamp,
   onStamp,
+  allowDownload,
+  onAllowDownload,
 }: {
   recipient: string;
   tags: string;
@@ -232,6 +236,9 @@ function WhoFields({
   /** Present only for file links (the stamp is burned into the PDF pages). */
   stamp?: boolean;
   onStamp?: (v: boolean) => void;
+  /** Present only for file links: let viewers download the PDF. */
+  allowDownload?: boolean;
+  onAllowDownload?: (v: boolean) => void;
 }) {
   return (
     <>
@@ -247,6 +254,19 @@ function WhoFields({
           </label>
         )}
       </div>
+      {allowDownload !== undefined && onAllowDownload && (
+        <div>
+          <label className="check">
+            <input type="checkbox" checked={allowDownload} onChange={(e) => onAllowDownload(e.target.checked)} />
+            <span>
+              <b>Allow download</b>: show a "Download PDF" button in the viewer
+            </span>
+          </label>
+          <p className="muted" style={{ fontSize: '0.8rem', margin: '4px 0 0' }}>
+            Off by default: the document is view-only. When on, anyone who can open the link can save a copy. With a recipient stamp, the downloaded copy carries the stamp (as page images, no selectable text).
+          </p>
+        </div>
+      )}
       <div>
         <label>Tags (comma-separated, optional)</label>
         <input value={tags} list="known-tags" placeholder="e.g. investor, seed-round" onChange={(e) => onTags(e.target.value)} autoCapitalize="none" />
@@ -306,7 +326,7 @@ export function NewLink() {
   const nav = useNavigate();
   const known = useKnownTags();
   const [kind, setKind] = useState<'file' | 'url'>('file');
-  const [f, setF] = useState({ title: '', recipient: '', tags: '', stamp: true, slug: '', password: '', expiresAt: '', maxViews: '', destinationUrl: '' });
+  const [f, setF] = useState({ title: '', recipient: '', tags: '', stamp: true, allowDownload: false, slug: '', password: '', expiresAt: '', maxViews: '', destinationUrl: '' });
   const [file, setFile] = useState<File | null>(null);
   const [mobileFile, setMobileFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
@@ -326,6 +346,7 @@ export function NewLink() {
         fd.append('title', f.title || first.name.replace(/\.pdf$/i, ''));
         if (f.recipient) fd.append('recipient', f.recipient);
         fd.append('stamp', f.stamp ? '1' : '0');
+        fd.append('allowDownload', f.allowDownload ? '1' : '0');
         if (f.tags) fd.append('tags', parseTags(f.tags).join(','));
         if (f.slug) fd.append('slug', f.slug);
         if (f.password) fd.append('password', f.password);
@@ -399,6 +420,8 @@ export function NewLink() {
           onTags={(v) => setF({ ...f, tags: v })}
           stamp={kind === 'file' ? f.stamp : undefined}
           onStamp={(v) => setF({ ...f, stamp: v })}
+          allowDownload={kind === 'file' ? f.allowDownload : undefined}
+          onAllowDownload={(v) => setF({ ...f, allowDownload: v })}
         />
         <div>
           <label>Slug (link name, optional)</label>
@@ -446,7 +469,7 @@ export function LinkDetail() {
   const nav = useNavigate();
   const known = useKnownTags();
   const [data, setData] = useState<{ link: LinkItem; versions: Version[]; url: string } | null>(null);
-  const [edit, setEdit] = useState({ title: '', recipient: '', tags: '', stamp: true, slug: '', expiresAt: '', maxViews: '', destinationUrl: '', password: '' });
+  const [edit, setEdit] = useState({ title: '', recipient: '', tags: '', stamp: true, allowDownload: false, slug: '', expiresAt: '', maxViews: '', destinationUrl: '', password: '' });
   const [saving, setSaving] = useState(false);
   const [m, setM] = useState<{ ok: boolean; text: string } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -466,6 +489,7 @@ export function LinkDetail() {
       recipient: r.link.recipient ?? '',
       tags: r.link.tags.join(', '),
       stamp: r.link.stamp,
+      allowDownload: r.link.allowDownload,
       slug: r.link.slug,
       expiresAt: toLocalInput(r.link.expiresAt),
       maxViews: r.link.maxViews ? String(r.link.maxViews) : '',
@@ -500,7 +524,7 @@ export function LinkDetail() {
         title: edit.title,
         recipient: edit.recipient || null,
         tags: parseTags(edit.tags),
-        ...(link.kind === 'file' ? { stamp: edit.stamp } : {}),
+        ...(link.kind === 'file' ? { stamp: edit.stamp, allowDownload: edit.allowDownload } : {}),
         slug: edit.slug,
         expiresAt: fromLocalInput(edit.expiresAt),
         maxViews: edit.maxViews ? Number(edit.maxViews) : null,
@@ -644,6 +668,8 @@ export function LinkDetail() {
           onTags={(v) => setEdit({ ...edit, tags: v })}
           stamp={link.kind === 'file' ? edit.stamp : undefined}
           onStamp={(v) => setEdit({ ...edit, stamp: v })}
+          allowDownload={link.kind === 'file' ? edit.allowDownload : undefined}
+          onAllowDownload={(v) => setEdit({ ...edit, allowDownload: v })}
         />
         {link.kind === 'file' && (
           <p className="muted" style={{ fontSize: '0.8rem', margin: 0 }}>

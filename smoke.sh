@@ -493,6 +493,29 @@ ok "a single file is the default for every device (no mobile variant)" 1 "$(curl
 ok "single file: phone sees it" 5 "$(pages_for "$UA_IPHONE" $B/single-m)"
 ok "single file: desktop sees it" 5 "$(pages_for "$UA_WIN" $B/single-m)"
 ok "single file: stored as the default variant on disk" 1 "$(docker compose exec -T app sh -c "ls /data/docs/$SMID/v1/original.pdf >/dev/null 2>&1 && ! [ -d /data/docs/$SMID/v1/mobile ] && echo 1 || echo 0" | tr -d '\r\n')"
+# --- optional PDF download ---
+dl_url(){ curl -s -A "$1 PreviewBot/1.0" "$2" | grep -o '/_d/[^"]*' | head -1 | sed 's/&amp;/\&/g'; }
+ok "viewer without download permission has no download link" 0 "$(curl -s -A "$UA_IPHONE PreviewBot/1.0" $B/responsive | grep -c '/_d/')"
+ok "create link with download allowed + recipient" 200 "$(mp $J /links -F kind=file -F title='Download Me' -F slug=dlstamped -F 'recipient=Erin' -F allowDownload=1 -F file=@/tmp/cdx-desk.pdf)"
+DID=$(sed -E 's/.*"id":"([^"]+)".*/\1/' /tmp/cdx-out)
+ok "link reports allowDownload" 1 "$(curl -s -b $J $B/api/links/$DID | grep -c '"allowDownload":true')"
+DLU=$(dl_url "$UA_IPHONE" $B/dlstamped)
+ok "viewer shows the download link" 1 "$(curl -s -A "$UA_IPHONE PreviewBot/1.0" $B/dlstamped | grep -c 'class="dl"')"
+ok "download responds as a PDF attachment" "application/pdf|attachment; filename=\"Download Me.pdf\"" "$(curl -s -D /tmp/cdx-h -o /tmp/cdx-dl.pdf "$B$DLU"; echo "$(grep -i '^content-type' /tmp/cdx-h | tr -d '\r' | sed 's/.*: //')|$(grep -i '^content-disposition' /tmp/cdx-h | tr -d '\r' | sed 's/.*: //')")"
+ok "downloaded file is a PDF" "%PDF-" "$(head -c 5 /tmp/cdx-dl.pdf)"
+ok "stamped download keeps all 5 pages (as stamped images)" 5 "$(grep -a -c '/Type /Page /Parent' /tmp/cdx-dl.pdf)"
+ok "stamped download carries the page images" 1 "$(grep -a -c 'DCTDecode' /tmp/cdx-dl.pdf | awk '{print ($1>0)?1:0}')"
+ok "download with a bad signature" 403 "$(curl -s -o /dev/null -w '%{http_code}' "$B$(echo $DLU | sed 's/&t=[^&]*/\&t=bad/')")"
+ok "download counted on the visit" 1 "$(curl -s -b $J "$B/api/links/$DID/views?range=30d&limit=10&bots=1&owner=1" | grep -c '"downloads":1')"
+ok "create plain link (no recipient) with download" 200 "$(mp $J /links -F kind=file -F title='Plain DL' -F slug=dlplain -F allowDownload=1 -F file=@/tmp/cdx-test1.pdf)"
+PDID=$(sed -E 's/.*"id":"([^"]+)".*/\1/' /tmp/cdx-out)
+PLU=$(dl_url "$UA_IPHONE" $B/dlplain)
+curl -s -o /tmp/cdx-dl2.pdf "$B$PLU"
+ok "unstamped download is the untouched original" 1 "$(cmp -s /tmp/cdx-dl2.pdf /tmp/cdx-test1.pdf && echo 1 || echo 0)"
+ok "turn download off" 200 "$(req $J PATCH /links/$PDID '{"allowDownload":false}')"
+ok "old download URL stops working" 404 "$(curl -s -o /dev/null -w '%{http_code}' "$B$PLU")"
+ok "viewer no longer shows it" 0 "$(curl -s -A "$UA_IPHONE PreviewBot/1.0" $B/dlplain | grep -c 'class="dl"')"
+ok "visitor detail names the link and recipient" 1 "$(VK=$(curl -s -b $J "$B/api/links/$DID/visitors?range=all&bots=1&owner=1" | grep -o '"key":"[0-9a-f]*"' | head -1 | sed 's/.*:"//;s/"//'); curl -s -b $J "$B/api/links/$DID/visitors/$VK?range=all&bots=1&owner=1" | grep -c '"link":{"id":"[^"]*","title":"Download Me","slug":"dlstamped","recipient":"Erin"')"
 ok "deleting the link removes both variants" 200 "$(req $J DELETE /links/$RID)"
 ok "variant files removed from disk" 0 "$(docker compose exec -T app sh -c "ls /data/docs/$RID 2>/dev/null | wc -l" | tr -d '\r\n')"
 ok "logout" 200 "$(req $J POST /logout)"

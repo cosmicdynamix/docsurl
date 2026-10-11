@@ -56,6 +56,7 @@ interface Session {
   isOwner?: boolean;
   visitor?: string;
   visitNo?: number;
+  downloads?: number;
   variant?: string;
   title?: string;
   recipient?: string | null;
@@ -214,6 +215,7 @@ function SessionCard({ s, showLink, linkId, urlKind }: { s: Session; showLink?: 
           </Link>
         ) : null}
         {s.visitNo === undefined ? null : s.visitNo > 1 ? <span className="badge ok">Returning #{s.visitNo}</span> : <span className="badge">New visitor</span>}
+        {s.downloads ? <span className="badge ok">Downloaded PDF{s.downloads > 1 ? ` ×${s.downloads}` : ''}</span> : null}
         {s.isBot && <span className="badge off">Bot</span>}
         {s.isOwner && <span className="badge">You</span>}
         {!isUrl && (
@@ -675,6 +677,7 @@ export function StatsOverview({ admin }: { admin: boolean }) {
 
 /* ---------- one visitor ---------- */
 interface VisitorDetailData {
+  link: { id: string; title: string; slug: string; recipient: string | null; kind: string };
   summary: { visits: number; firstSeen: string; lastSeen: string; totalActiveMs: number; avgActiveMs: number; deepestPage: number; pageCount: number; avgDepth: number };
   pages: { pageNo: number; totalDwellMs: number; visitsWithPage: number }[];
   visits: Session[];
@@ -684,9 +687,7 @@ export function VisitorDetail() {
   const { id, key } = useParams();
   const [d, setD] = useState<VisitorDetailData | null>(null);
   const [missing, setMissing] = useState(false);
-  const [title, setTitle] = useState('');
   useEffect(() => {
-    void api<{ link: { title: string } }>('GET', `/links/${id}`).then((r) => setTitle(r.link.title));
     api<VisitorDetailData>('GET', `/links/${id}/visitors/${key}?range=all&bots=1&owner=1`)
       .then(setD)
       .catch(() => setMissing(true));
@@ -705,7 +706,19 @@ export function VisitorDetail() {
           <button className="small">Back to stats</button>
         </Link>
       </div>
-      <p className="muted">{title}</p>
+      <div className="card stack" style={{ gap: 4 }}>
+        <div>
+          <span className="muted">Viewed link: </span>
+          <Link to={`/links/${d.link.id}`}>
+            <b>{d.link.title}</b>
+          </Link>{' '}
+          <span className="muted">/{d.link.slug}</span>
+        </div>
+        <div>
+          <span className="muted">Sent to: </span>
+          {d.link.recipient ? <b>{d.link.recipient}</b> : <span className="muted">no recipient set</span>}
+        </div>
+      </div>
       <div className="stats-grid">
         <Stat label="Visits" value={s.visits} sub={`first ${when(s.firstSeen)}`} />
         <Stat label="Total active time" value={fmtDuration(s.totalActiveMs)} sub={`${fmtDuration(s.avgActiveMs)} per visit`} />

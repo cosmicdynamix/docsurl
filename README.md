@@ -18,7 +18,7 @@ Upload a PDF, share one link, and see who opened it, from where, for how long, h
 - QR code per link, link-preview cards (Open Graph) for chat apps, tags and search
 
 **View-only viewer**
-- Pages are rendered to images on the server; the original PDF and any download link are **never sent** to the visitor
+- Pages are rendered to images on the server; by default the original PDF and any download link are **never sent** to the visitor. Per link you can opt in to **Allow download** (a "Download PDF" button; stamped documents download as the stamped pages, so the stamp travels with the copy)
 - Image URLs are signed and short-lived; mobile-first, pinch-to-zoom, page indicator
 
 **Analytics** (excluding bots/link previews and your own views by default)
