@@ -1,5 +1,5 @@
 import { getBranding } from './branding.js';
-import type { Signature } from './signature.js';
+import { type Signature, parseNote } from './signature.js';
 
 export const esc = (s: string): string =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -119,7 +119,13 @@ function signatureHtml(s: Signature | null | undefined): string {
     contact.push(href ? `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(w.replace(/^https?:\/\//i, ''))}</a>` : esc(w));
   }
   if (contact.length) lines.push(`<div class="sg-c">${contact.join(' · ')}</div>`);
-  if (s.note) lines.push(`<div class="sg-t">${esc(s.note)}</div>`);
+  if (s.note) {
+    const body = parseNote(s.note)
+      .map((p) => (p.href ? `<a href="${esc(p.href)}" target="_blank" rel="noopener noreferrer nofollow">${esc(p.text)}</a>` : esc(p.text)))
+      .join('')
+      .replace(/\r?\n/g, '<br>');
+    lines.push(`<div class="sg-t">${body}</div>`);
+  }
   return lines.length ? `<footer class="sg">${lines.join('')}</footer>` : '';
 }
 

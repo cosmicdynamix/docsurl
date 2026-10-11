@@ -534,6 +534,14 @@ ok "edit the link signature" 200 "$(req $J PATCH /links/$SGID '{"signature":{"na
 SGH=$(curl -s -A "$UA_IPHONE PreviewBot/1.0" $B/signed)
 ok "footer follows the edit" 1 "$(echo "$SGH" | grep -c '<b>John Roe</b>')"
 ok "website becomes a safe link" 1 "$(echo "$SGH" | grep -c 'href="https://example.com/x" target="_blank" rel="noopener noreferrer"')"
+ok "set a note with simple links and hostile markup" 200 "$(req $J PATCH /links/$SGID '{"signature":{"name":"N","note":"<a href=\"https://ex.com/a\" onclick=\"x()\">Site</a> <script>alert(1)</script> [Doc](javascript:alert(1)) https://b.com/p a@b.com <a href=\"javascript:x()\">bad</a>"}}')"
+SGH=$(curl -s -A "$UA_IPHONE PreviewBot/1.0" $B/signed)
+ok "note: <a href> becomes a safe link" 1 "$(echo "$SGH" | grep -c '<a href="https://ex.com/a" target="_blank" rel="noopener noreferrer nofollow">Site</a>')"
+ok "note: bare URL linked" 1 "$(echo "$SGH" | grep -c 'href="https://b.com/p"')"
+ok "note: bare email linked" 1 "$(echo "$SGH" | grep -c 'href="mailto:a@b.com"')"
+ok "note: script tag stays inert text" 0 "$(echo "$SGH" | grep -c '<script>alert')"
+ok "note: no onclick survives" 0 "$(echo "$SGH" | grep -c 'onclick')"
+ok "note: no javascript: href" 0 "$(echo "$SGH" | grep -ci 'href="javascript')"
 ok "remove the link signature" 200 "$(req $J PATCH /links/$SGID '{"signature":null}')"
 ok "footer gone after removal" 0 "$(curl -s -A "$UA_IPHONE PreviewBot/1.0" $B/signed | grep -c 'class="sg"')"
 ok "clear my signature" 200 "$(req $J PATCH /me '{"signature":null}')"
