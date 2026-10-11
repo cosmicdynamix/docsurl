@@ -393,7 +393,8 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
       pool.query(
         `select v.id, v.started_at as "startedAt", l.id as "linkId", l.title, l.recipient, v.country, v.city, v.browser, v.os,
                 v.device_type as device, v.in_app as "inApp", v.referrer_host as "referrerHost", v.src_tag as "srcTag",
-                v.active_ms as "activeMs", v.max_page as "maxPage", cv.page_count as "pageCount"
+                v.active_ms as "activeMs", v.open_ms as "openMs", v.max_page as "maxPage", v.top_dwell_page as "topPage",
+                cv.page_count as "pageCount", l.kind as "linkKind"
            from views v join links l on l.id = v.link_id left join link_versions cv on cv.id = v.version_id
           where ${scope} and not v.is_bot and not v.is_owner_preview order by v.started_at desc limit 15`,
         [req.user!.id],

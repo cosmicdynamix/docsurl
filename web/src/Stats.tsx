@@ -59,6 +59,7 @@ interface Session {
   title?: string;
   recipient?: string | null;
   linkId?: string;
+  linkKind?: string;
 }
 
 /* ---------- small chart components (pure SVG, theme-aware) ---------- */
@@ -177,7 +178,9 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function SessionCard({ s, showLink, linkId }: { s: Session; showLink?: boolean; linkId?: string }) {
+function SessionCard({ s, showLink, linkId, urlKind }: { s: Session; showLink?: boolean; linkId?: string; urlKind?: boolean }) {
+  // Short URLs redirect immediately, so there is no reading time or page data to show.
+  const isUrl = urlKind || s.linkKind === 'url';
   const place = [s.city && s.city !== 'Unknown' ? s.city : null, s.country ? countryName(s.country) : null].filter(Boolean).join(', ') || 'Unknown location';
   const dev = [s.device, [s.browser, s.browserVer].filter(Boolean).join(' '), [s.os, s.osVer].filter(Boolean).join(' ')].filter(Boolean).join(' · ');
   return (
@@ -211,17 +214,21 @@ function SessionCard({ s, showLink, linkId }: { s: Session; showLink?: boolean; 
         {s.visitNo === undefined ? null : s.visitNo > 1 ? <span className="badge ok">Returning #{s.visitNo}</span> : <span className="badge">New visitor</span>}
         {s.isBot && <span className="badge off">Bot</span>}
         {s.isOwner && <span className="badge">You</span>}
-        <span>
-          Active <b>{fmtDuration(s.activeMs)}</b>
-        </span>
-        <span className="muted">· open {fmtDuration(s.openMs)}</span>
-        {s.maxPage ? (
-          <span className="muted">
-            · reached page {s.maxPage}
-            {s.pageCount ? `/${s.pageCount}` : ''}
-          </span>
-        ) : null}
-        {s.topPage ? <span className="muted">· longest on page {s.topPage}</span> : null}
+        {!isUrl && (
+          <>
+            <span>
+              Active <b>{fmtDuration(s.activeMs)}</b>
+            </span>
+            <span className="muted">· open {fmtDuration(s.openMs)}</span>
+            {s.maxPage ? (
+              <span className="muted">
+                · reached page {s.maxPage}
+                {s.pageCount ? `/${s.pageCount}` : ''}
+              </span>
+            ) : null}
+            {s.topPage ? <span className="muted">· longest on page {s.topPage}</span> : null}
+          </>
+        )}
       </div>
       {s.referrerUrl && (
         <div className="muted" style={{ fontSize: '0.78rem', wordBreak: 'break-all' }}>
@@ -537,7 +544,7 @@ export function LinkStats() {
         </div>
         {sessions.length === 0 && <div className="empty">No visits in this range.</div>}
         {sessions.map((v) => (
-          <SessionCard key={v.id} s={v} linkId={id} />
+          <SessionCard key={v.id} s={v} linkId={id} urlKind={link?.kind === 'url'} />
         ))}
         {more && sessions.length > 0 && (
           <button onClick={loadMore} disabled={loading} style={{ width: '100%', marginTop: 10 }}>
@@ -599,11 +606,12 @@ export function StatsOverview({ admin }: { admin: boolean }) {
                     {l.recipient && <span className="muted"> · {l.recipient}</span>}
                   </span>
                   <span className="num">
-                    <b>{fmtNum(l.views)}</b> <span className="muted">views</span>
+                    <b>{fmtNum(l.views)}</b> <span className="muted">{l.views === 1 ? 'view' : 'views'}</span>
                   </span>
                 </div>
                 <div className="muted num" style={{ fontSize: '0.8rem' }}>
-                  {l.visitors} visitors · avg. active {fmtDuration(l.avgActiveMs)} · last {when(l.lastViewed)}
+                  {l.visitors} {l.visitors === 1 ? 'visitor' : 'visitors'}
+                  {l.kind === 'file' ? ` · avg. active ${fmtDuration(l.avgActiveMs)}` : ''} · last {when(l.lastViewed)}
                 </div>
               </div>
             ))}

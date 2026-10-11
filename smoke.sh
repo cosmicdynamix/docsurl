@@ -219,6 +219,8 @@ ok "csv header" 1 "$(echo "$CSV" | head -1 | grep -c '^startedAt,visitor,visitNo
 ok "csv rows (3 visits)" 4 "$(echo "$CSV" | wc -l)"
 ok "overview endpoint" 200 "$(req $J GET "/stats/overview?range=30d&tz=UTC")"
 ok "overview lists top link with recipient" 1 "$(grep -c 'Alice - Seed Fund' /tmp/cdx-out)"
+ok "overview recent visits include open time and longest page" 1 "$(grep -c '"openMs":90000.*"topPage":3' /tmp/cdx-out)"
+ok "overview recent visits carry the link kind" 1 "$(grep -c '"linkKind":"file"' /tmp/cdx-out)"
 ok "overview has by-user table for admin" 1 "$(grep -c '"byUser":\[{' /tmp/cdx-out)"
 ok "user cannot read foreign stats" 404 "$(req $U2 GET "/links/$SID/stats?range=30d")"
 ok "user cannot export foreign csv" 404 "$(curl -s -o /dev/null -w '%{http_code}' -b $U2 "$B/api/links/$SID/views.csv")"
