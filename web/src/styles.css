@@ -549,3 +549,10 @@ h3 {
   max-width: 80%;
   object-fit: contain;
 }
+
+/* With a custom background image, boxes are slightly see-through (about 66% opaque). */
+html[data-bg] .card {
+  background: color-mix(in srgb, var(--surface) 66%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}

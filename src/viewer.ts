@@ -37,7 +37,7 @@ const bgCss = (): string => {
   const b = getBranding();
   if (!b.bgImage) return '';
   const veil = 'linear-gradient(color-mix(in srgb,var(--bg) 55%,transparent),color-mix(in srgb,var(--bg) 55%,transparent))';
-  return `html{background:var(--bg)}body{background:transparent}body::before{content:'';position:fixed;inset:0;z-index:-1;background:${veil},url(/brand/background?v=${b.version}) center/cover no-repeat}`;
+  return `.card{background:color-mix(in srgb,var(--surface) 66%,transparent);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}html{background:var(--bg)}body{background:transparent}body::before{content:'';position:fixed;inset:0;z-index:-1;background:${veil},url(/brand/background?v=${b.version}) center/cover no-repeat}`;
 };
 
 function shell(opts: { title: string; head?: string; body: string; nonce: string }): string {
