@@ -56,12 +56,12 @@ export function notFoundPage(nonce: string): string {
   });
 }
 
-export function unlockPage(opts: { slug: string; title: string; error?: boolean; nonce: string }): string {
+export function unlockPage(opts: { slug: string; title: string; error?: boolean; nonce: string; src?: string | null }): string {
   return shell({
     title: opts.title,
     nonce: opts.nonce,
     body: `<div class="center"><div class="box"><div class="logo">${logos()}<span class="nm">${esc(getBranding().siteName)}</span></div>
-<form class="card" method="post" action="/${encodeURIComponent(opts.slug)}/unlock">
+<form class="card" method="post" action="/${encodeURIComponent(opts.slug)}/unlock${opts.src ? `?src=${encodeURIComponent(opts.src)}` : ""}">
 <h1>${esc(opts.title)}</h1><p>This document is password protected.</p>
 ${opts.error ? '<p class="err">Incorrect password.</p>' : ''}
 <label for="pw" style="font-size:.85rem;color:var(--muted)">Password</label>

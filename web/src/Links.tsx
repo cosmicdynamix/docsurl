@@ -422,6 +422,8 @@ export function LinkDetail() {
   const [m, setM] = useState<{ ok: boolean; text: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
+  const [srcTag, setSrcTag] = useState('');
+  const [copiedTag, setCopiedTag] = useState(false);
   const [note, setNote] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -446,6 +448,8 @@ export function LinkDetail() {
 
   if (!data) return <p className="muted">Loading…</p>;
   const { link, versions, url } = data;
+  const tagClean = srcTag.trim().toLowerCase().replace(/\s+/g, '-');
+  const taggedUrl = `${url}?src=${encodeURIComponent(tagClean || 'name')}`;
   const act = async (fn: () => Promise<unknown>, ok = 'Saved.') => {
     setM(null);
     try {
@@ -555,6 +559,28 @@ export function LinkDetail() {
             </a>
           </div>
         </div>
+      </div>
+
+      <div className="card stack">
+        <h2>Tracked link</h2>
+        <p className="muted" style={{ margin: 0 }}>
+          Add a tag to tell shares apart: one tag per person or channel (e.g. a name or <code>linkedin-post</code>). Everyone still sees the same document, and Stats shows each tag separately.
+        </p>
+        <input value={srcTag} placeholder="Tag, e.g. umut" maxLength={64} autoCapitalize="none" onChange={(e) => setSrcTag(e.target.value)} />
+        <div className="secret" style={{ fontSize: '0.9rem' }}>
+          {taggedUrl}
+        </div>
+        <button
+          disabled={!srcTag.trim()}
+          onClick={async () => {
+            if (await copy(taggedUrl)) {
+              setCopiedTag(true);
+              setTimeout(() => setCopiedTag(false), 1500);
+            }
+          }}
+        >
+          {copiedTag ? 'Copied ✓' : 'Copy tracked link'}
+        </button>
       </div>
 
       <form className="card stack" onSubmit={save}>

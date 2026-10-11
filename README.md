@@ -111,3 +111,7 @@ GNU Affero General Public License v3.0 or later — see [LICENSE](LICENSE). If y
 3. Add the environment variables `APP_SECRET` (`openssl rand -hex 32`) and `SETUP_TOKEN` (any long random value). Behind Cloudflare also set `CLIENT_IP_HEADER=cf-connecting-ip`.
 4. Deploy, open `https://your-domain/app/`, finish the setup with your `SETUP_TOKEN`, then upload your logos in **Settings**.
 5. Add backups for the `docs-pgdata` and `docs-files` volumes.
+
+## Source tags (`?src=`)
+
+Append `?src=<tag>` to any link to tell shares apart without creating new links, e.g. `https://docs.example.com/pitchdeck?src=jane` or `?src=linkedin-post`. The tag is stored with every view and shown in the link's **Stats → Where visitors came from → Source tags**, and next to each visit. It works for password-protected links too (the tag is kept through the password step). In the panel, open a link and use **Tracked link** to build and copy the URL.

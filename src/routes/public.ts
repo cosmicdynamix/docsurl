@@ -85,6 +85,12 @@ function html(reply: FastifyReply, status: number, body: string) {
 
 const VID_COOKIE = 'docs_vid';
 
+/** The ?src= source tag of a request (kept through the password step), or null. */
+function srcOf(req: FastifyRequest): string | null {
+  const v = (req.query as { src?: unknown }).src;
+  return typeof v === 'string' && v.trim() ? v.trim().slice(0, 64) : null;
+}
+
 async function recordView(req: FastifyRequest, reply: FastifyReply, link: PublicLink): Promise<number> {
   const ua = String(req.headers['user-agent'] ?? '').slice(0, 400);
   const h = (name: string) => {
@@ -260,14 +266,14 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
     const link = await findLink(slug.data);
     if (!link || !link.active || !link.password_hash) return html(reply, 404, notFoundPage(nonce));
     const key = `${clientIp(req)}|${link.id}`;
-    if (unlockLocked(key)) return html(reply, 429, unlockPage({ slug: link.slug, title: link.title, error: true, nonce }));
+    if (unlockLocked(key)) return html(reply, 429, unlockPage({ slug: link.slug, title: link.title, error: true, nonce, src: srcOf(req) }));
     const pw = String((req.body as { password?: string } | undefined)?.password ?? '');
     if (!(await verifyPassword(link.password_hash, pw))) {
       purgeExpired(unlockFails);
       const f = unlockFails.get(key);
       if (!f || Date.now() > f.until) unlockFails.set(key, { n: 1, until: Date.now() + 15 * 60_000 });
       else f.n++;
-      return html(reply, 401, unlockPage({ slug: link.slug, title: link.title, error: true, nonce }));
+      return html(reply, 401, unlockPage({ slug: link.slug, title: link.title, error: true, nonce, src: srcOf(req) }));
     }
     unlockFails.delete(key);
     const exp = Math.floor(Date.now() / 1000) + ACCESS_TTL_S;
@@ -278,7 +284,8 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
       secure: secureCookie(req),
       maxAge: ACCESS_TTL_S,
     });
-    return reply.code(303).header('Location', `/${link.slug}`).send();
+    const keep = srcOf(req);
+    return reply.code(303).header('Location', `/${link.slug}${keep ? `?src=${encodeURIComponent(keep)}` : ''}`).send();
   });
 
   app.get('/:slug', async (req, reply) => {
@@ -300,7 +307,7 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
       const [expStr, sig] = (c ?? '').split('.');
       const exp = Number(expStr);
       const ok = !!sig && exp > Date.now() / 1000 && safeEq(sig, accessSig({ id: link.id, password_hash: link.password_hash }, exp));
-      if (!ok) return html(reply, 200, unlockPage({ slug: link.slug, title: link.title, nonce }));
+      if (!ok) return html(reply, 200, unlockPage({ slug: link.slug, title: link.title, nonce, src: srcOf(req) }));
     }
 
     const pages = (
