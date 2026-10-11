@@ -10,7 +10,7 @@ const BASE_CSS = `
 html,body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;-webkit-text-size-adjust:100%}
 .logo-l{display:none}
 @media (prefers-color-scheme:light){.logo-d{display:none}.logo-l{display:inline-block}}
-.bar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;padding:10px 16px;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
+.bar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;padding:calc(10px + env(safe-area-inset-top)) 16px 10px;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
 .bar img{height:26px;width:auto;max-width:160px;object-fit:contain}
 .bar .nm{font-weight:600;white-space:nowrap}
 @media (max-width:520px){.bar .nm{display:none}}
