@@ -103,6 +103,13 @@ export interface ViewerOpts {
   nonce: string;
 }
 
+/**
+ * Cloudflare's "Email Address Obfuscation" rewrites anything that looks like an address into "[email protected]"
+ * (and needs a script our CSP blocks). Splitting the "@" out of the text and encoding it in the href keeps addresses readable.
+ */
+const escMailText = (t: string): string => esc(t).replace(/@/g, '<span>@</span>');
+const mailHref = (a: string): string => `mailto:${esc(a).replace(/@/g, '%40')}`;
+
 /** Footer with the sender's details. Everything is escaped; only http(s), mailto and tel links are made clickable. */
 function signatureHtml(s: Signature | null | undefined): string {
   if (!s) return '';
@@ -111,7 +118,7 @@ function signatureHtml(s: Signature | null | undefined): string {
   if (who.length) lines.push(`<div class="sg-n">${who.length === 2 ? `<b>${who[0]}</b> · ${who[1]}` : `<b>${who[0]}</b>`}</div>`);
   if (s.company) lines.push(`<div>${esc(s.company)}</div>`);
   const contact: string[] = [];
-  if (s.email) contact.push(/^[^\s@<>"]+@[^\s@<>"]+$/.test(s.email) ? `<a href="mailto:${esc(s.email)}">${esc(s.email)}</a>` : esc(s.email));
+  if (s.email) contact.push(/^[^\s@<>"]+@[^\s@<>"]+$/.test(s.email) ? `<a href="${mailHref(s.email)}">${escMailText(s.email)}</a>` : escMailText(s.email));
   if (s.phone) contact.push(/^[+\d][\d\s().-]{4,}$/.test(s.phone) ? `<a href="tel:${esc(s.phone.replace(/[^\d+]/g, ''))}">${esc(s.phone)}</a>` : esc(s.phone));
   if (s.website) {
     const w = s.website;
@@ -121,12 +128,16 @@ function signatureHtml(s: Signature | null | undefined): string {
   if (contact.length) lines.push(`<div class="sg-c">${contact.join(' · ')}</div>`);
   if (s.note) {
     const body = parseNote(s.note)
-      .map((p) => (p.href ? `<a href="${esc(p.href)}" target="_blank" rel="noopener noreferrer nofollow">${esc(p.text)}</a>` : esc(p.text)))
+      .map((p) => {
+        if (!p.href) return escMailText(p.text);
+        const href = p.href.startsWith('mailto:') ? mailHref(p.href.slice(7)) : esc(p.href);
+        return `<a href="${href}" target="_blank" rel="noopener noreferrer nofollow">${escMailText(p.text)}</a>`;
+      })
       .join('')
       .replace(/\r?\n/g, '<br>');
     lines.push(`<div class="sg-t">${body}</div>`);
   }
-  return lines.length ? `<footer class="sg">${lines.join('')}</footer>` : '';
+  return lines.length ? `<footer class="sg"><div class="sg-in">${lines.join('')}</div></footer>` : '';
 }
 
 export function viewerPage(o: ViewerOpts): string {
@@ -147,7 +158,8 @@ export function viewerPage(o: ViewerOpts): string {
 ${o.ogImage ? `<meta property="og:image" content="${esc(o.ogImage)}">` : ''}`;
   const css = `
 .pgs{max-width:1100px;margin:0 auto;padding:10px 8px 24px}
-.sg{max-width:1100px;margin:0 auto;padding:18px 16px calc(84px + env(safe-area-inset-bottom));border-top:1px solid var(--border);text-align:center;font-size:.85rem;line-height:1.6;color:var(--muted)}
+.sg{width:100%;background:var(--surface);border-top:1px solid var(--border);padding:20px 16px calc(84px + env(safe-area-inset-bottom));text-align:center;font-size:.85rem;line-height:1.6;color:var(--muted)}
+.sg-in{max-width:1100px;margin:0 auto}
 .sg b{color:var(--text)}.sg a{color:var(--accent);text-decoration:none}.sg-t{margin-top:4px;font-size:.8rem}
 .pgs.nosg{padding-bottom:80px}
 .pg{position:relative;width:100%;margin:0 0 10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;overflow:hidden}

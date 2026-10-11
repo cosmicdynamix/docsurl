@@ -528,7 +528,7 @@ SGH=$(curl -s -A "$UA_IPHONE PreviewBot/1.0" $B/signed)
 ok "viewer shows the footer" 1 "$(echo "$SGH" | grep -c 'class="sg"')"
 ok "footer shows the name" 1 "$(echo "$SGH" | grep -c '<b>Jane Doe</b>')"
 ok "footer escapes HTML" 0 "$(echo "$SGH" | grep -c 'Acme <b>Inc')"
-ok "footer links the email" 1 "$(echo "$SGH" | grep -c 'href="mailto:jane@acme.com"')"
+ok "footer links the email" 1 "$(echo "$SGH" | grep -c 'href="mailto:jane%40acme.com"')"
 ok "footer never makes a javascript: link" 0 "$(echo "$SGH" | grep -ci 'href="javascript')"
 ok "edit the link signature" 200 "$(req $J PATCH /links/$SGID '{"signature":{"name":"John Roe","website":"https://example.com/x"}}')"
 SGH=$(curl -s -A "$UA_IPHONE PreviewBot/1.0" $B/signed)
@@ -538,7 +538,7 @@ ok "set a note with simple links and hostile markup" 200 "$(req $J PATCH /links/
 SGH=$(curl -s -A "$UA_IPHONE PreviewBot/1.0" $B/signed)
 ok "note: <a href> becomes a safe link" 1 "$(echo "$SGH" | grep -c '<a href="https://ex.com/a" target="_blank" rel="noopener noreferrer nofollow">Site</a>')"
 ok "note: bare URL linked" 1 "$(echo "$SGH" | grep -c 'href="https://b.com/p"')"
-ok "note: bare email linked" 1 "$(echo "$SGH" | grep -c 'href="mailto:a@b.com"')"
+ok "note: bare email linked" 1 "$(echo "$SGH" | grep -c 'href="mailto:a%40b.com"')"
 ok "note: script tag stays inert text" 0 "$(echo "$SGH" | grep -c '<script>alert')"
 ok "note: no onclick survives" 0 "$(echo "$SGH" | grep -c 'onclick')"
 ok "note: no javascript: href" 0 "$(echo "$SGH" | grep -ci 'href="javascript')"
