@@ -32,7 +32,7 @@ Browser ──▶ reverse proxy (TLS) ──▶ app (Fastify, one container) ─
 | Preview image | `/_og/<slug>.jpg` | Small first page for chat-app link cards; never stamped; hidden for password links |
 | Engagement beacon | `POST /_t/<viewId>` | HMAC token per view |
 | Branding | `GET /api/branding`, `/brand/logo/{dark,light}`, `/brand/icon/{180,192,512}`, `/brand/background`, `/manifest.webmanifest` |
-| Optional download | `GET /_d/<link>/<ver>/<variant>?e`/brand/background`, `/manifest.webmanifest` |t`/brand/background`, `/manifest.webmanifest` |v` | Signed, 1 h; only while the link has `allow_download` on | Public (needed on the sign-in and viewer pages) |
+| Optional download | `GET /_d/<link>/<ver>/<variant>` (signed query) | Signed, 1 h; only while the link has download allowed |
 
 Slugs that collide with application paths are reserved (`app`, `api`, `health`, `brand`, …).
 
