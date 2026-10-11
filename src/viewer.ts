@@ -75,6 +75,7 @@ export interface ViewerOpts {
   title: string;
   linkId: string;
   versionNo: number;
+  variant: string;
   pages: { width: number; height: number }[];
   exp: number;
   sig: string;
@@ -86,7 +87,7 @@ export interface ViewerOpts {
 }
 
 export function viewerPage(o: ViewerOpts): string {
-  const imgBase = `/_p/${o.linkId}/${o.versionNo}`;
+  const imgBase = `/_p/${o.linkId}/${o.versionNo}/${o.variant}`;
   const pages = o.pages
     .map(
       (p, i) =>

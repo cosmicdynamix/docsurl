@@ -36,7 +36,7 @@ for (const type of ['application/json', 'text/plain']) {
 
 await app.register(cookie);
 await app.register(formbody);
-await app.register(multipart, { limits: { fileSize: config.maxUploadMb * 1024 * 1024, files: 1, fields: 20, fieldSize: 4096 } });
+await app.register(multipart, { limits: { fileSize: config.maxUploadMb * 1024 * 1024, files: 2, fields: 20, fieldSize: 4096 } });
 await app.register(rateLimit, { global: true, max: 300, timeWindow: '1 minute', keyGenerator: (req) => clientIp(req) });
 
 app.decorateRequest('user', null);

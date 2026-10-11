@@ -1,20 +1,20 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
-import { mkdir, rename, unlink } from 'node:fs/promises';
+import { cp, mkdir, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { MultipartFile } from '@fastify/multipart';
-import type { PoolClient } from 'pg';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { PoolClient } from 'pg';
 import QRCode from 'qrcode';
 import { z } from 'zod';
 import { audit, requireAuth } from '../auth.js';
 import { pool } from '../db.js';
 import { hashPassword } from '../passwords.js';
 import { PdfError, type RenderedPdf, renderPdf } from '../pdf.js';
-import { stampText } from '../stamp.js';
 import { generateSlug, slugSchema } from '../slug.js';
-import { linkDir, originalPath, removeDir, tmpDir, versionDir } from '../storage.js';
+import { stampText } from '../stamp.js';
+import { type Variant, linkDir, originalPath, removeDir, tmpDir, variantDir, versionDir } from '../storage.js';
 
 const idParam = z.object({ id: z.string().uuid() });
 const linkPasswordSchema = z.string().min(4, 'Link password must be at least 4 characters').max(200);
@@ -24,9 +24,7 @@ const urlSchema = z
   .max(2048)
   .url()
   .refine((u) => /^https?:\/\//i.test(u), 'Only http or https addresses can be shortened');
-const optionalDate = z
-  .union([z.string().datetime({ offset: true }), z.null()])
-  .optional();
+const optionalDate = z.union([z.string().datetime({ offset: true }), z.null()]).optional();
 const optionalMaxViews = z.union([z.number().int().positive().max(10_000_000), z.null()]).optional();
 const recipientSchema = z.union([z.string().trim().max(200), z.null()]).optional();
 /** Accepts true/false, "1"/"0", "true"/"false". */
@@ -60,10 +58,14 @@ const LINK_SELECT = `
          l.created_at as "createdAt", l.updated_at as "updatedAt", l.owner_id as "ownerId", u.email as "ownerEmail",
          ${EFFECTIVE} as "effectiveStatus",
          (select count(*)::int from views v where v.link_id = l.id and not v.is_bot and not v.is_owner_preview) as views,
-         cv.version_no as "versionNo", cv.page_count as "pageCount", cv.size_bytes as "sizeBytes", cv.original_name as "originalName"
+         cv.version_no as "versionNo",
+         df.page_count as "pageCount", df.size_bytes as "sizeBytes", df.original_name as "originalName",
+         (mf.version_id is not null) as "hasMobile", mf.page_count as "mobilePageCount", mf.original_name as "mobileName"
     from links l
     join users u on u.id = l.owner_id
-    left join link_versions cv on cv.id = l.current_version_id`;
+    left join link_versions cv on cv.id = l.current_version_id
+    left join version_files df on df.version_id = cv.id and df.variant = 'desktop'
+    left join version_files mf on mf.version_id = cv.id and mf.variant = 'mobile'`;
 
 async function getAccessible(req: FastifyRequest, reply: FastifyReply, id: string) {
   const { rows } = await pool.query(`${LINK_SELECT} where l.id = $1`, [id]);
@@ -75,50 +77,63 @@ async function getAccessible(req: FastifyRequest, reply: FastifyReply, id: strin
   return link;
 }
 
-interface Upload {
-  fields: Record<string, string>;
-  tmpFile: string | null;
-  originalName: string | null;
-  sha256: string | null;
+/* ------------------------------------------------------------------ uploads */
+
+interface UploadedFile {
+  tmpFile: string;
+  originalName: string;
+  sha256: string;
   size: number;
 }
 
-/** Stream a multipart request: text fields + at most one PDF file saved into the tmp dir. */
+interface Upload {
+  fields: Record<string, string>;
+  /** "desktop" also receives the plain `file` field; "mobile" is the optional second PDF. */
+  files: Partial<Record<Variant, UploadedFile>>;
+}
+
+const emptyUpload = (): Upload => ({ fields: {}, files: {} });
+
+/** Stream a multipart request: text fields + up to two PDFs (fields `desktop`/`file` and `mobile`) saved in the tmp dir. */
 async function readUpload(req: FastifyRequest): Promise<Upload> {
-  const up: Upload = { fields: {}, tmpFile: null, originalName: null, sha256: null, size: 0 };
+  const up = emptyUpload();
   await mkdir(tmpDir, { recursive: true });
-  for await (const part of req.parts()) {
-    if (part.type === 'field') {
-      up.fields[part.fieldname] = String(part.value);
-      continue;
+  try {
+    for await (const part of req.parts()) {
+      if (part.type === 'field') {
+        up.fields[part.fieldname] = String(part.value);
+        continue;
+      }
+      const file = part as MultipartFile;
+      const slot: Variant | null = file.fieldname === 'mobile' ? 'mobile' : file.fieldname === 'file' || file.fieldname === 'desktop' ? 'desktop' : null;
+      if (!slot || up.files[slot]) {
+        file.file.resume();
+        continue;
+      }
+      const tmp = path.join(tmpDir, `${randomUUID()}.upload`);
+      const hash = createHash('sha256');
+      let size = 0;
+      file.file.on('data', (c: Buffer) => {
+        size += c.length;
+        hash.update(c);
+      });
+      await pipeline(file.file, createWriteStream(tmp));
+      if (file.file.truncated) {
+        await unlink(tmp).catch(() => {});
+        throw new PdfError('file_too_large');
+      }
+      up.files[slot] = { tmpFile: tmp, originalName: (file.filename ?? 'document.pdf').slice(0, 200), sha256: hash.digest('hex'), size };
     }
-    const file = part as MultipartFile;
-    if (up.tmpFile || file.fieldname !== 'file') {
-      file.file.resume();
-      continue;
-    }
-    const tmp = path.join(tmpDir, `${randomUUID()}.upload`);
-    const hash = createHash('sha256');
-    let size = 0;
-    file.file.on('data', (c: Buffer) => {
-      size += c.length;
-      hash.update(c);
-    });
-    await pipeline(file.file, createWriteStream(tmp));
-    if (file.file.truncated) {
-      await unlink(tmp).catch(() => {});
-      throw new PdfError('file_too_large');
-    }
-    up.tmpFile = tmp;
-    up.originalName = (file.filename ?? 'document.pdf').slice(0, 200);
-    up.sha256 = hash.digest('hex');
-    up.size = size;
+  } catch (e) {
+    await discard(up);
+    throw e;
   }
   return up;
 }
 
+/** Delete any temp files that were not moved into place. */
 async function discard(up: Upload): Promise<void> {
-  if (up.tmpFile) await unlink(up.tmpFile).catch(() => {});
+  for (const f of Object.values(up.files)) if (f?.tmpFile) await unlink(f.tmpFile).catch(() => {});
 }
 
 const PDF_ERRORS: Record<string, number> = {
@@ -132,34 +147,71 @@ const PDF_ERRORS: Record<string, number> = {
   busy: 409,
 };
 
-/** Move the uploaded PDF into place and render its pages. Returns metadata for the DB. */
-async function storeVersion(linkId: string, versionNo: number, up: Upload, stamp: string | null) {
-  const dir = versionDir(linkId, versionNo);
-  await mkdir(dir, { recursive: true });
-  await rename(up.tmpFile!, originalPath(linkId, versionNo));
-  up.tmpFile = null;
-  return renderPdf(originalPath(linkId, versionNo), dir, { stamp });
-}
-
-async function insertPages(client: PoolClient, versionId: string, pages: { width: number; height: number }[]) {
-  for (let i = 0; i < pages.length; i++) {
-    await client.query('insert into link_pages(version_id, page_no, width, height) values ($1,$2,$3,$4)', [
-      versionId,
-      i + 1,
-      pages[i].width,
-      pages[i].height,
-    ]);
-  }
-}
-
 function sendPdfError(reply: FastifyReply, e: unknown) {
   if (e instanceof PdfError) return reply.code(PDF_ERRORS[e.code] ?? 400).send({ error: e.code });
   throw e;
 }
 
+/* ----------------------------------------------------------------- variants */
+
+interface StoredVariant {
+  variant: Variant;
+  originalName: string | null;
+  sha256: string;
+  size: number;
+  rendered: RenderedPdf;
+}
+
+/** Move an uploaded PDF into its variant directory and render (and stamp) its pages. */
+async function storeUploaded(linkId: string, versionNo: number, variant: Variant, f: UploadedFile, stamp: string | null): Promise<StoredVariant> {
+  const dir = variantDir(linkId, versionNo, variant);
+  await mkdir(dir, { recursive: true });
+  await rename(f.tmpFile, originalPath(linkId, versionNo, variant));
+  f.tmpFile = '';
+  // og.jpg (link-preview card) always comes from the desktop/default file
+  const rendered = await renderPdf(originalPath(linkId, versionNo, variant), dir, { stamp, og: variant === 'desktop' });
+  return { variant, originalName: f.originalName, sha256: f.sha256, size: f.size, rendered };
+}
+
+/** Copy a variant (original + stamped pages + preview) from an older version into a new one. */
+async function carryOver(linkId: string, fromNo: number, toNo: number, variant: Variant, client: PoolClient, fromVersionId: string, toVersionId: string): Promise<void> {
+  const src = variantDir(linkId, fromNo, variant);
+  const dst = variantDir(linkId, toNo, variant);
+  await mkdir(dst, { recursive: true });
+  await cp(path.join(src, 'original.pdf'), path.join(dst, 'original.pdf'));
+  await cp(path.join(src, 'pages'), path.join(dst, 'pages'), { recursive: true });
+  if (variant === 'desktop') await cp(path.join(src, 'og.jpg'), path.join(dst, 'og.jpg')).catch(() => {});
+  await client.query(
+    `insert into version_files(version_id, variant, original_name, page_count, file_sha256, size_bytes)
+     select $2, variant, original_name, page_count, file_sha256, size_bytes from version_files where version_id = $1 and variant = $3`,
+    [fromVersionId, toVersionId, variant],
+  );
+  await client.query(
+    `insert into link_pages(version_id, variant, page_no, width, height)
+     select $2, variant, page_no, width, height from link_pages where version_id = $1 and variant = $3`,
+    [fromVersionId, toVersionId, variant],
+  );
+}
+
+async function insertVariant(client: PoolClient, versionId: string, s: StoredVariant): Promise<void> {
+  await client.query(
+    'insert into version_files(version_id, variant, original_name, page_count, file_sha256, size_bytes) values ($1,$2,$3,$4,$5,$6)',
+    [versionId, s.variant, s.originalName, s.rendered.pageCount, s.sha256, s.size],
+  );
+  for (let i = 0; i < s.rendered.pages.length; i++) {
+    await client.query('insert into link_pages(version_id, variant, page_no, width, height) values ($1,$2,$3,$4,$5)', [
+      versionId,
+      s.variant,
+      i + 1,
+      s.rendered.pages[i].width,
+      s.rendered.pages[i].height,
+    ]);
+  }
+}
+
 const restamping = new Set<string>();
 
-/** Re-render every stored version of a link with the current stamp setting (originals are kept untouched). */
+/** Re-render every stored version and variant of a link with the current stamp setting (originals stay untouched). */
 async function restamp(linkId: string): Promise<void> {
   if (restamping.has(linkId)) throw new PdfError('busy');
   restamping.add(linkId);
@@ -167,12 +219,18 @@ async function restamp(linkId: string): Promise<void> {
     const l = (await pool.query<{ recipient: string | null; stamp: boolean }>('select recipient, stamp from links where id = $1', [linkId])).rows[0];
     if (!l) return;
     const text = l.recipient && l.stamp ? stampText(l.recipient) : null;
-    const versions = (await pool.query<{ version_no: number }>('select version_no from link_versions where link_id = $1 order by version_no', [linkId])).rows;
-    for (const v of versions) {
-      const dir = versionDir(linkId, v.version_no);
+    const files = (
+      await pool.query<{ version_no: number; variant: Variant }>(
+        `select v.version_no, f.variant from link_versions v join version_files f on f.version_id = v.id
+          where v.link_id = $1 order by v.version_no, f.variant`,
+        [linkId],
+      )
+    ).rows;
+    for (const f of files) {
+      const dir = variantDir(linkId, f.version_no, f.variant);
       const fresh = path.join(dir, 'pages.new');
       await removeDir(fresh);
-      await renderPdf(originalPath(linkId, v.version_no), dir, { stamp: text, pagesSubdir: 'pages.new', og: false });
+      await renderPdf(originalPath(linkId, f.version_no, f.variant), dir, { stamp: text, pagesSubdir: 'pages.new', og: false });
       await removeDir(path.join(dir, 'pages'));
       await rename(fresh, path.join(dir, 'pages'));
     }
@@ -201,7 +259,10 @@ export async function linkRoutes(app: FastifyInstance): Promise<void> {
       await pool.query(
         `select v.id, v.version_no as "versionNo", v.original_name as "originalName", v.page_count as "pageCount",
                 v.size_bytes as "sizeBytes", v.note, v.uploaded_at as "uploadedAt", u.email as "uploadedBy",
-                (v.id = l.current_version_id) as current
+                (v.id = l.current_version_id) as current,
+                (select coalesce(json_agg(json_build_object('variant', f.variant, 'originalName', f.original_name,
+                          'pageCount', f.page_count, 'sizeBytes', f.size_bytes) order by f.variant), '[]'::json)
+                   from version_files f where f.version_id = v.id) as files
            from link_versions v join links l on l.id = v.link_id left join users u on u.id = v.uploaded_by
           where v.link_id = $1 order by v.version_no desc`,
         [p.data.id],
@@ -213,7 +274,7 @@ export async function linkRoutes(app: FastifyInstance): Promise<void> {
   // Create: multipart for files (field "kind"=file), JSON for URL shortening.
   app.post('/api/links', { preHandler: requireAuth }, async (req, reply) => {
     const isMultipart = req.isMultipart();
-    let up: Upload = { fields: {}, tmpFile: null, originalName: null, sha256: null, size: 0 };
+    let up = emptyUpload();
     let raw: Record<string, unknown>;
     try {
       if (isMultipart) {
@@ -234,7 +295,6 @@ export async function linkRoutes(app: FastifyInstance): Promise<void> {
         raw.password = raw.password ? raw.password : undefined;
       }
     } catch (e) {
-      await discard(up);
       return sendPdfError(reply, e);
     }
 
@@ -261,12 +321,12 @@ export async function linkRoutes(app: FastifyInstance): Promise<void> {
       await discard(up);
       return reply.code(400).send({ error: 'expiry_in_past' });
     }
-    if (d.kind === 'file' && !up.tmpFile) return reply.code(400).send({ error: 'file_required' });
+    if (d.kind === 'file' && !up.files.desktop && !up.files.mobile) return reply.code(400).send({ error: 'file_required' });
     if (d.kind === 'url' && !d.destinationUrl) {
       await discard(up);
       return reply.code(400).send({ error: 'destination_required' });
     }
-    if (d.kind === 'url' && up.tmpFile) await discard(up);
+    if (d.kind === 'url') await discard(up);
     if (d.kind === 'url' && d.password) return reply.code(400).send({ error: 'password_not_supported_for_url' });
 
     const slug = d.slug ?? (await generateSlug());
@@ -288,10 +348,14 @@ export async function linkRoutes(app: FastifyInstance): Promise<void> {
       return { id: linkId, slug, url: `${baseUrl(req)}/${slug}` };
     }
 
-    // file link
-    let rendered: RenderedPdf;
+    // File link. With two PDFs they become the desktop and mobile variants; with one PDF it is used on every device.
+    const desktopFile = up.files.desktop ?? up.files.mobile!;
+    const mobileFile = up.files.desktop && up.files.mobile ? up.files.mobile : undefined;
+    const stamp = d.recipient && d.stamp !== false ? stampText(d.recipient) : null;
+    const stored: StoredVariant[] = [];
     try {
-      rendered = await storeVersion(linkId, 1, up, d.recipient && d.stamp !== false ? stampText(d.recipient) : null);
+      stored.push(await storeUploaded(linkId, 1, 'desktop', desktopFile, stamp));
+      if (mobileFile) stored.push(await storeUploaded(linkId, 1, 'mobile', mobileFile, stamp));
     } catch (e) {
       await discard(up);
       await removeDir(linkDir(linkId));
@@ -306,12 +370,13 @@ export async function linkRoutes(app: FastifyInstance): Promise<void> {
         [linkId, req.user!.id, slug, d.title, pwHash, d.expiresAt ?? null, d.maxViews ?? null, d.recipient || null, d.tags ?? [], d.stamp !== false],
       );
       const versionId = randomUUID();
+      const main = stored[0];
       await client.query(
         `insert into link_versions(id, link_id, version_no, original_name, page_count, file_sha256, size_bytes, uploaded_by)
          values ($1,$2,1,$3,$4,$5,$6,$7)`,
-        [versionId, linkId, up.originalName, rendered.pageCount, up.sha256, up.size, req.user!.id],
+        [versionId, linkId, main.originalName, main.rendered.pageCount, main.sha256, main.size, req.user!.id],
       );
-      await insertPages(client, versionId, rendered.pages);
+      for (const s of stored) await insertVariant(client, versionId, s);
       await client.query('update links set current_version_id = $2 where id = $1', [linkId, versionId]);
       await client.query('commit');
     } catch (e) {
@@ -321,7 +386,7 @@ export async function linkRoutes(app: FastifyInstance): Promise<void> {
     } finally {
       client.release();
     }
-    await audit(req, 'link.created', 'link', linkId, { slug, kind: 'file', pages: rendered.pageCount });
+    await audit(req, 'link.created', 'link', linkId, { slug, kind: 'file', pages: stored[0].rendered.pageCount, mobile: !!mobileFile });
     return { id: linkId, slug, url: `${baseUrl(req)}/${slug}` };
   });
 
@@ -396,7 +461,11 @@ export async function linkRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
-  // New version of a file link ("replace file"): same slug, same stats.
+  /**
+   * New version of a file link ("replace file"): same slug, same stats.
+   * Fields: `desktop` (or `file`) and/or `mobile` PDFs, optional `note`, optional `removeMobile=1`.
+   * Variants that are not uploaded are carried over unchanged from the live version.
+   */
   app.post('/api/links/:id/versions', { preHandler: requireAuth }, async (req, reply) => {
     const p = idParam.safeParse(req.params);
     if (!p.success) return reply.code(400).send({ error: 'invalid' });
@@ -411,29 +480,67 @@ export async function linkRoutes(app: FastifyInstance): Promise<void> {
     } catch (e) {
       return sendPdfError(reply, e);
     }
-    if (!up.tmpFile) return reply.code(400).send({ error: 'file_required' });
+    const removeMobile = ['1', 'true'].includes(up.fields.removeMobile ?? '');
+    if (!up.files.desktop && !up.files.mobile && !(removeMobile && link.hasMobile)) {
+      return reply.code(400).send({ error: 'file_required' });
+    }
+
+    const live = (
+      await pool.query<{ id: string; version_no: number; variants: Variant[] }>(
+        `select v.id, v.version_no, array(select variant from version_files where version_id = v.id) as variants
+           from links l join link_versions v on v.id = l.current_version_id where l.id = $1`,
+        [p.data.id],
+      )
+    ).rows[0];
+    if (!live) {
+      await discard(up);
+      return reply.code(409).send({ error: 'invalid' });
+    }
 
     const next =
       (await pool.query('select coalesce(max(version_no), 0) + 1 as n from link_versions where link_id = $1', [p.data.id]))
         .rows[0].n as number;
-    let rendered: RenderedPdf;
+    const stamp = link.recipient && link.stamp ? stampText(link.recipient) : null;
+    const stored: StoredVariant[] = [];
     try {
-      rendered = await storeVersion(p.data.id, next, up, link.recipient && link.stamp ? stampText(link.recipient) : null);
+      if (up.files.desktop) stored.push(await storeUploaded(p.data.id, next, 'desktop', up.files.desktop, stamp));
+      if (up.files.mobile) stored.push(await storeUploaded(p.data.id, next, 'mobile', up.files.mobile, stamp));
     } catch (e) {
       await discard(up);
       await removeDir(versionDir(p.data.id, next));
       return sendPdfError(reply, e);
     }
+
     const client = await pool.connect();
     try {
       await client.query('begin');
       const versionId = randomUUID();
+      // Desktop file metadata lives on the version row too (kept for older queries and listings)
+      const newDesktop = stored.find((s) => s.variant === 'desktop');
+      let meta: { original_name: string | null; page_count: number; file_sha256: string; size_bytes: string };
+      if (newDesktop) {
+        meta = { original_name: newDesktop.originalName, page_count: newDesktop.rendered.pageCount, file_sha256: newDesktop.sha256, size_bytes: String(newDesktop.size) };
+      } else {
+        meta = (
+          await client.query(
+            'select original_name, page_count, file_sha256, size_bytes from version_files where version_id = $1 and variant = $2',
+            [live.id, 'desktop'],
+          )
+        ).rows[0];
+      }
       await client.query(
         `insert into link_versions(id, link_id, version_no, original_name, page_count, file_sha256, size_bytes, note, uploaded_by)
          values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-        [versionId, p.data.id, next, up.originalName, rendered.pageCount, up.sha256, up.size, (up.fields.note ?? '').slice(0, 300) || null, req.user!.id],
+        [versionId, p.data.id, next, meta.original_name, meta.page_count, meta.file_sha256, meta.size_bytes, (up.fields.note ?? '').slice(0, 300) || null, req.user!.id],
       );
-      await insertPages(client, versionId, rendered.pages);
+      for (const s of stored) await insertVariant(client, versionId, s);
+      // Carry over what was not replaced (mobile can be dropped explicitly)
+      for (const variant of ['desktop', 'mobile'] as const) {
+        if (stored.some((s) => s.variant === variant)) continue;
+        if (variant === 'mobile' && removeMobile) continue;
+        if (!live.variants.includes(variant)) continue;
+        await carryOver(p.data.id, live.version_no, next, variant, client, live.id, versionId);
+      }
       await client.query('update links set current_version_id = $2, updated_at = now() where id = $1', [p.data.id, versionId]);
       await client.query('commit');
     } catch (e) {
@@ -443,7 +550,7 @@ export async function linkRoutes(app: FastifyInstance): Promise<void> {
     } finally {
       client.release();
     }
-    await audit(req, 'link.version_added', 'link', p.data.id, { versionNo: next, pages: rendered.pageCount });
+    await audit(req, 'link.version_added', 'link', p.data.id, { versionNo: next, replaced: stored.map((s) => s.variant), removeMobile });
     return { ok: true, versionNo: next };
   });
 
@@ -469,5 +576,4 @@ export async function linkRoutes(app: FastifyInstance): Promise<void> {
     const svg = await QRCode.toString(`${baseUrl(req)}/${link.slug}`, { type: 'svg', margin: 2, errorCorrectionLevel: 'M' });
     return reply.type('image/svg+xml').send(svg);
   });
-
 }

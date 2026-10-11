@@ -12,6 +12,7 @@ const querySchema = z.object({
   bots: flag,
   owner: flag,
   version: z.string().refine((v) => v === 'all' || /^[0-9a-f-]{36}$/i.test(v)).optional(),
+  variant: z.enum(['desktop', 'mobile']).default('desktop'),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -78,13 +79,13 @@ const SESSION_COLS = `s.id, s.started_at as "startedAt", s.country, s.region, s.
   s.os, s.os_ver as "osVer", s.device_type as device, s.in_app as "inApp", s.referrer_url as "referrerUrl",
   s.referrer_host as "referrerHost", s.src_tag as "srcTag", s.active_ms as "activeMs", s.open_ms as "openMs",
   s.max_page as "maxPage", s.top_dwell_page as "topPage", s.is_bot as "isBot", s.is_owner_preview as "isOwner",
-  s.page_count as "pageCount", s.lang, s.visitor, s.visit_no as "visitNo"`;
+  s.page_count as "pageCount", s.lang, s.visitor, s.visit_no as "visitNo", s.variant`;
 
 const sessionsSql = (extra = ""): string => `
   select ${SESSION_COLS} from (
     select v.*, cv.page_count, substr(md5(${VISITOR}), 1, 12) as visitor,
            row_number() over (partition by ${VISITOR} order by v.started_at)::int as visit_no
-      from views v left join link_versions cv on cv.id = v.version_id
+      from views v left join version_files cv on cv.version_id = v.version_id and cv.variant = v.variant
      where v.link_id = $1 and ($4::bool or not v.is_bot) and ($5::bool or not v.is_owner_preview)${extra}
   ) s where s.started_at >= $2 and s.started_at < $3
   order by s.started_at desc limit $6 offset $7`;
@@ -134,15 +135,17 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
               cv.original_name as "originalName", (cv.id = l.current_version_id) as current,
               count(v.id)::int as views, count(distinct ${VISITOR})::int as visitors,
               coalesce(round(avg(v.active_ms)), 0)::int as "avgActiveMs",
-              coalesce(avg(case when cv.page_count > 0 and v.max_page is not null then least(v.max_page::float / cv.page_count, 1) end), 0) as "avgDepth",
-              count(v.id) filter (where cv.page_count > 0 and v.max_page >= cv.page_count)::int as completed
+              coalesce(avg(case when vf.page_count > 0 and v.max_page is not null then least(v.max_page::float / vf.page_count, 1) end), 0) as "avgDepth",
+              count(v.id) filter (where vf.page_count > 0 and v.max_page >= vf.page_count)::int as completed,
+              exists (select 1 from version_files mf where mf.version_id = cv.id and mf.variant = 'mobile') as "hasMobile"
          from link_versions cv join links l on l.id = cv.link_id
          left join views v on v.version_id = cv.id and v.started_at >= $2 and v.started_at < $3
                           and ($4::bool or not v.is_bot) and ($5::bool or not v.is_owner_preview)
+         left join version_files vf on vf.version_id = cv.id and vf.variant = v.variant
         where cv.link_id = $1 group by cv.id, l.current_version_id order by cv.version_no desc`,
       base,
     );
-    const [summary, returning, timeline, countries, cities, browsers, oses, devices, sources, referrers, tags, langs, pages, byVersion] = await Promise.all([
+    const [summary, returning, timeline, countries, cities, browsers, oses, devices, sources, referrers, tags, langs, layouts, pages, byVersion] = await Promise.all([
       pool.query(
         `select count(*)::int as views, count(distinct ${VISITOR})::int as visitors,
                 coalesce(round(avg(v.active_ms)), 0)::int as "avgActiveMs", coalesce(round(avg(v.open_ms)), 0)::int as "avgOpenMs",
@@ -150,7 +153,7 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
                 coalesce(avg(case when cv.page_count > 0 and v.max_page is not null then least(v.max_page::float / cv.page_count, 1) end), 0) as "avgDepth",
                 count(*) filter (where cv.page_count > 0 and v.max_page >= cv.page_count)::int as completed,
                 count(*) filter (where v.active_ms is not null)::int as measured
-           from views v left join link_versions cv on cv.id = v.version_id where ${BASE}`,
+           from views v left join version_files cv on cv.version_id = v.version_id and cv.variant = v.variant where ${BASE}`,
         base,
       ),
       pool.query(
@@ -191,16 +194,17 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
         base,
       ),
       group(`coalesce(v.lang, 'Unknown')`),
+      group('v.variant'),
       link.kind === 'file' && version
         ? pool.query(
             `select g.n as "pageNo",
-                    (select count(*) from views v where v.version_id = $6 and ${BASE} and v.max_page >= g.n)::int as reached,
+                    (select count(*) from views v where v.version_id = $6 and v.variant = $7 and ${BASE} and v.max_page >= g.n)::int as reached,
                     coalesce((select round(avg(vp.dwell_ms)) from view_pages vp join views v on v.id = vp.view_id
-                               where v.version_id = $6 and ${BASE} and vp.page_no = g.n), 0)::int as "avgDwellMs",
+                               where v.version_id = $6 and v.variant = $7 and ${BASE} and vp.page_no = g.n), 0)::int as "avgDwellMs",
                     coalesce((select sum(vp.dwell_ms) from view_pages vp join views v on v.id = vp.view_id
-                               where v.version_id = $6 and ${BASE} and vp.page_no = g.n), 0)::bigint as "totalDwellMs"
-               from generate_series(1, (select page_count from link_versions where id = $6)) as g(n) order by g.n`,
-            [...base, version],
+                               where v.version_id = $6 and v.variant = $7 and ${BASE} and vp.page_no = g.n), 0)::bigint as "totalDwellMs"
+               from generate_series(1, (select page_count from version_files where version_id = $6 and variant = $7)) as g(n) order by g.n`,
+            [...base, version, q.data.variant],
           )
         : Promise.resolve({ rows: [] }),
       byVersionQ,
@@ -223,6 +227,8 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
       oses: oses.rows,
       devices: devices.rows,
       languages: langs.rows,
+      layouts: layouts.rows,
+      pageVariant: q.data.variant,
       sources: mergeSources(sources.rows),
       referrers: referrers.rows,
       tags: tags.rows,
@@ -250,7 +256,7 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
     if (!link) return;
     const { from, to } = bounds(q.data.range);
     const { rows } = await pool.query(sessionsSql(versionSql(q.data.version)), [link.id, from, to, q.data.bots === '1', q.data.owner === '1', 10000, 0]);
-    const cols = ['startedAt', 'visitor', 'visitNo', 'country', 'region', 'city', 'device', 'os', 'osVer', 'browser', 'browserVer', 'source', 'referrerUrl', 'srcTag', 'activeMs', 'openMs', 'maxPage', 'pageCount', 'topPage', 'lang', 'isBot', 'isOwner'];
+    const cols = ['startedAt', 'visitor', 'visitNo', 'country', 'region', 'city', 'device', 'os', 'osVer', 'browser', 'browserVer', 'source', 'referrerUrl', 'srcTag', 'variant', 'activeMs', 'openMs', 'maxPage', 'pageCount', 'topPage', 'lang', 'isBot', 'isOwner'];
     const lines = [cols.join(',')];
     for (const r of (rows as SessionRow[]).map(withSource)) lines.push(cols.map((c) => csvCell((r as Record<string, unknown>)[c])).join(','));
     return reply
@@ -273,7 +279,7 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
     const BASE = BASE_Q + versionSql(q.data.version);
     const { rows } = await pool.query(
       `with s as (
-         select v.*, cv.page_count, ${VKEY} as vkey from views v left join link_versions cv on cv.id = v.version_id where ${BASE}
+         select v.*, cv.page_count, ${VKEY} as vkey from views v left join version_files cv on cv.version_id = v.version_id and cv.variant = v.variant where ${BASE}
        ), agg as (
          select vkey, count(*)::int as visits, min(started_at) as "firstSeen", max(started_at) as "lastSeen",
                 coalesce(sum(active_ms), 0)::bigint as "totalActiveMs", coalesce(round(avg(active_ms)), 0)::int as "avgActiveMs",
@@ -318,7 +324,7 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
                 coalesce(sum(v.active_ms), 0)::float8 as "totalActiveMs", coalesce(round(avg(v.active_ms)), 0)::int as "avgActiveMs",
                 coalesce(max(v.max_page), 0)::int as "deepestPage", coalesce(max(cv.page_count), 0)::int as "pageCount",
                 coalesce(avg(case when cv.page_count > 0 and v.max_page is not null then least(v.max_page::float / cv.page_count, 1) end), 0) as "avgDepth"
-           from views v left join link_versions cv on cv.id = v.version_id where ${BASE}`,
+           from views v left join version_files cv on cv.version_id = v.version_id and cv.variant = v.variant where ${BASE}`,
         base,
       ),
       pool.query(
@@ -357,7 +363,7 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
                 coalesce(round(avg(v.active_ms)), 0)::int as "avgActiveMs",
                 coalesce(avg(case when cv.page_count > 0 and v.max_page is not null then least(v.max_page::float / cv.page_count, 1) end), 0) as "avgDepth",
                 (select count(*)::int from links l where ${scope}) as links
-           from views v join links l on l.id = v.link_id left join link_versions cv on cv.id = v.version_id where ${BASE_O}`,
+           from views v join links l on l.id = v.link_id left join version_files cv on cv.version_id = v.version_id and cv.variant = v.variant where ${BASE_O}`,
         base,
       ),
       pool.query(
@@ -395,7 +401,7 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
                 v.device_type as device, v.in_app as "inApp", v.referrer_host as "referrerHost", v.src_tag as "srcTag",
                 v.active_ms as "activeMs", v.open_ms as "openMs", v.max_page as "maxPage", v.top_dwell_page as "topPage",
                 cv.page_count as "pageCount", l.kind as "linkKind"
-           from views v join links l on l.id = v.link_id left join link_versions cv on cv.id = v.version_id
+           from views v join links l on l.id = v.link_id left join version_files cv on cv.version_id = v.version_id and cv.variant = v.variant
           where ${scope} and not v.is_bot and not v.is_owner_preview order by v.started_at desc limit 15`,
         [req.user!.id],
       ),

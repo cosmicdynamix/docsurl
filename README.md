@@ -11,6 +11,7 @@ Upload a PDF, share one link, and see who opened it, from where, for how long, h
 **Sharing**
 - PDF upload → a stable link `https://your.host/<slug>`; replace the file any time, the link and stats stay
 - Optional **password**, **expiry date** and **view limit**, set at upload or later
+- **Desktop and mobile PDFs**: upload one PDF for every device, or two (a desktop and a mobile layout) and phones automatically get the mobile one
 - **File versions**: every upload is kept; roll back with one click; stats are available per version
 - **Recipient stamp**: a light-gray box with red text, `Confidential — for <name>`, burned into the top-right corner of every page (per-link toggle)
 - **Short URL mode**: shorten any http(s) address with the same options and statistics
@@ -111,6 +112,16 @@ GNU Affero General Public License v3.0 or later — see [LICENSE](LICENSE). If y
 3. Add the environment variables `APP_SECRET` (`openssl rand -hex 32`) and `SETUP_TOKEN` (any long random value). Behind Cloudflare also set `CLIENT_IP_HEADER=cf-connecting-ip`.
 4. Deploy, open `https://your-domain/app/`, finish the setup with your `SETUP_TOKEN`, then upload your logos in **Settings**.
 5. Add backups for the `docs-pgdata` and `docs-files` volumes.
+
+## Desktop and mobile PDFs
+
+A link can show a different PDF on phones, for example a portrait mobile layout next to a landscape slide deck.
+
+- **One file**: it is used on every device (whichever slot you put it in).
+- **Two files** (*Desktop PDF* + *Mobile PDF*): phones receive the mobile PDF; desktops, laptops and tablets receive the desktop PDF.
+- **Replacing files** keeps what you do not touch: upload only a new desktop PDF and the existing mobile PDF is carried over into the new version (and vice versa). Tick *Remove the mobile PDF* to go back to a single file. Every version keeps its own pair of files and can be made live again.
+- **Previewing**: on a link's page use *Preview desktop* / *Preview mobile*, or append `?view=desktop` / `?view=mobile` to the URL.
+- **Stamp, password, expiry and view limits** apply to both files. Page statistics (reach, time per page) are tracked per layout, so the *Pages* report has a Desktop PDF / Mobile PDF toggle and *Stats* shows how many views each layout served.
 
 ## Source tags (`?src=`)
 

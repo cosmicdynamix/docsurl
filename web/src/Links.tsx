@@ -25,6 +25,9 @@ export interface LinkItem {
   pageCount: number | null;
   sizeBytes: string | null;
   originalName: string | null;
+  hasMobile: boolean;
+  mobilePageCount: number | null;
+  mobileName: string | null;
 }
 
 interface Version {
@@ -37,6 +40,7 @@ interface Version {
   uploadedAt: string;
   uploadedBy: string | null;
   current: boolean;
+  files: { variant: 'desktop' | 'mobile'; originalName: string | null; pageCount: number; sizeBytes: string }[];
 }
 
 const msg = (e: unknown) => errorMessage(e);
@@ -159,7 +163,7 @@ export function LinksList({ admin }: { admin: boolean }) {
               {url}
             </div>
             <div className="row muted num" style={{ fontSize: '0.8rem' }}>
-              <span>{l.kind === 'file' ? `PDF · ${plural(l.pageCount ?? 0, 'page')}` : 'Short URL'}</span>
+              <span>{l.kind === 'file' ? `PDF · ${plural(l.pageCount ?? 0, 'page')}${l.hasMobile ? ` + mobile ${plural(l.mobilePageCount ?? 0, 'page')}` : ''}` : 'Short URL'}</span>
               <span>· {plural(l.views, 'view')}</span>
               {l.hasPassword && <span>· 🔒 password</span>}
               {l.expiresAt && <span>· expires {fmtDate(l.expiresAt)}</span>}
@@ -275,6 +279,37 @@ function useKnownTags(): string[] {
   return tags;
 }
 
+/** One PDF picker (desktop or mobile file). */
+function PdfSlot({ label, file, onFile, disabled, current }: { label: string; file: File | null; onFile: (f: File | null) => void; disabled?: boolean; current?: string | null }) {
+  const ref = useRef<HTMLInputElement>(null);
+  return (
+    <div>
+      <label>{label}</label>
+      <input
+        ref={ref}
+        type="file"
+        accept="application/pdf,.pdf"
+        hidden
+        onChange={(e) => {
+          onFile(e.target.files?.[0] ?? null);
+          e.target.value = '';
+        }}
+      />
+      <div className="row" style={{ flexWrap: 'nowrap' }}>
+        <button type="button" className={file ? '' : 'primary'} style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} onClick={() => ref.current?.click()} disabled={disabled}>
+          {file ? `${file.name} (${fmtSize(file.size)})` : 'Choose PDF'}
+        </button>
+        {file && (
+          <button type="button" className="small" onClick={() => onFile(null)} disabled={disabled}>
+            Clear
+          </button>
+        )}
+      </div>
+      {current !== undefined && <div className="muted" style={{ fontSize: '0.8rem', marginTop: 4 }}>Current: {current || 'none'}</div>}
+    </div>
+  );
+}
+
 /* ---------------- new ---------------- */
 export function NewLink() {
   const nav = useNavigate();
@@ -282,10 +317,10 @@ export function NewLink() {
   const [kind, setKind] = useState<'file' | 'url'>('file');
   const [f, setF] = useState({ title: '', recipient: '', tags: '', stamp: true, slug: '', password: '', expiresAt: '', maxViews: '', destinationUrl: '' });
   const [file, setFile] = useState<File | null>(null);
+  const [mobileFile, setMobileFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [processing, setProcessing] = useState(false);
   const [err, setErr] = useState('');
-  const fileRef = useRef<HTMLInputElement>(null);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -293,10 +328,11 @@ export function NewLink() {
     try {
       let res: { id: string };
       if (kind === 'file') {
-        if (!file) return setErr(msg(new ApiError(400, 'file_required')));
+        const first = file ?? mobileFile;
+        if (!first) return setErr(msg(new ApiError(400, 'file_required')));
         const fd = new FormData();
         fd.append('kind', 'file');
-        fd.append('title', f.title || file.name.replace(/\.pdf$/i, ''));
+        fd.append('title', f.title || first.name.replace(/\.pdf$/i, ''));
         if (f.recipient) fd.append('recipient', f.recipient);
         fd.append('stamp', f.stamp ? '1' : '0');
         if (f.tags) fd.append('tags', parseTags(f.tags).join(','));
@@ -305,7 +341,9 @@ export function NewLink() {
         const iso = fromLocalInput(f.expiresAt);
         if (iso) fd.append('expiresAt', iso);
         if (f.maxViews) fd.append('maxViews', f.maxViews);
-        fd.append('file', file); // file last so fields are parsed first
+        // files last so the text fields are parsed first
+        if (file) fd.append('desktop', file);
+        if (mobileFile) fd.append('mobile', mobileFile);
         setProgress(0);
         res = await upload('/links', fd, (p) => {
           setProgress(p);
@@ -345,12 +383,12 @@ export function NewLink() {
       </div>
       <form className="card stack" onSubmit={submit}>
         {kind === 'file' ? (
-          <div>
-            <label>PDF file (100 MB maximum)</label>
-            <input ref={fileRef} type="file" accept="application/pdf,.pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} hidden />
-            <button type="button" className="primary" style={{ width: '100%' }} onClick={() => fileRef.current?.click()} disabled={busy}>
-              {file ? `${file.name} (${fmtSize(file.size)})` : 'Choose PDF'}
-            </button>
+          <div className="stack">
+            <PdfSlot label="Desktop PDF" file={file} onFile={setFile} disabled={busy} />
+            <PdfSlot label="Mobile PDF (optional)" file={mobileFile} onFile={setMobileFile} disabled={busy} />
+            <p className="muted" style={{ fontSize: '0.8rem', margin: 0 }}>
+              Upload <b>one PDF</b> to show it on every device, or <b>two</b> to show the mobile PDF on phones and the desktop PDF everywhere else. 100 MB maximum per file.
+            </p>
           </div>
         ) : (
           <div>
@@ -425,7 +463,9 @@ export function LinkDetail() {
   const [srcTag, setSrcTag] = useState('');
   const [copiedTag, setCopiedTag] = useState(false);
   const [note, setNote] = useState('');
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [newDesktop, setNewDesktop] = useState<File | null>(null);
+  const [newMobile, setNewMobile] = useState<File | null>(null);
+  const [removeMobile, setRemoveMobile] = useState(false);
 
   const load = useCallback(async () => {
     const r = await api<{ link: LinkItem; versions: Version[]; url: string }>('GET', `/links/${id}`);
@@ -479,15 +519,20 @@ export function LinkDetail() {
     setSaving(false);
   }
 
-  async function newVersion(file: File) {
+  async function newVersion() {
     const fd = new FormData();
     if (note) fd.append('note', note);
-    fd.append('file', file);
+    if (removeMobile && !newMobile) fd.append('removeMobile', '1');
+    if (newDesktop) fd.append('desktop', newDesktop);
+    if (newMobile) fd.append('mobile', newMobile);
     setM(null);
     setProgress(0);
     try {
       await upload(`/links/${link.id}/versions`, fd, (p) => setProgress(p));
       setNote('');
+      setNewDesktop(null);
+      setNewMobile(null);
+      setRemoveMobile(false);
       await load();
       setM({ ok: true, text: 'New version uploaded. The link and its stats stayed the same.' });
     } catch (x) {
@@ -530,6 +575,16 @@ export function LinkDetail() {
           <a href={url} target="_blank" rel="noreferrer">
             <button>Open</button>
           </a>
+          {link.hasMobile && (
+            <>
+              <a href={`${url}?view=desktop`} target="_blank" rel="noreferrer">
+                <button className="small">Preview desktop</button>
+              </a>
+              <a href={`${url}?view=mobile`} target="_blank" rel="noreferrer">
+                <button className="small">Preview mobile</button>
+              </a>
+            </>
+          )}
           <Link to={`/links/${link.id}/stats`}>
             <button>Stats</button>
           </Link>
@@ -546,6 +601,7 @@ export function LinkDetail() {
           {link.kind === 'file' && (
             <span>
               · v{link.versionNo} · {plural(link.pageCount ?? 0, 'page')} · {fmtSize(link.sizeBytes)}
+              {link.hasMobile ? ` · mobile PDF: ${plural(link.mobilePageCount ?? 0, 'page')}` : ' · same file on every device'}
             </span>
           )}
           <span>· created {fmtDate(link.createdAt)}</span>
@@ -658,25 +714,24 @@ export function LinkDetail() {
           </div>
 
           <div className="card stack">
-            <h2>Replace file</h2>
-            <p className="muted">Upload a new PDF. The link, slug and past stats stay the same. Older versions are kept.</p>
+            <h2>Replace files</h2>
+            <p className="muted">
+              Upload a new version. The link, slug and past stats stay the same and older versions are kept. Choose only the file(s) you want to change; the other one is carried over.
+            </p>
+            <PdfSlot label="New desktop PDF" file={newDesktop} onFile={setNewDesktop} disabled={progress !== null} current={link.originalName} />
+            <PdfSlot label="New mobile PDF" file={newMobile} onFile={setNewMobile} disabled={progress !== null} current={link.hasMobile ? link.mobileName : null} />
+            {link.hasMobile && (
+              <label className="check">
+                <input type="checkbox" checked={removeMobile} disabled={!!newMobile} onChange={(e) => setRemoveMobile(e.target.checked)} />
+                <span>Remove the mobile PDF (use the desktop PDF on phones too)</span>
+              </label>
+            )}
             <div>
               <label>Version note (optional)</label>
               <input value={note} onChange={(e) => setNote(e.target.value)} />
             </div>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="application/pdf,.pdf"
-              hidden
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void newVersion(f);
-                e.target.value = '';
-              }}
-            />
-            <button onClick={() => fileRef.current?.click()} disabled={progress !== null}>
-              {progress === null ? 'Choose new PDF' : progress < 1 ? `Uploading… ${Math.round(progress * 100)}%` : 'Processing…'}
+            <button className="primary" onClick={() => void newVersion()} disabled={progress !== null || (!newDesktop && !newMobile && !(removeMobile && link.hasMobile))}>
+              {progress === null ? 'Upload new version' : progress < 1 ? `Uploading… ${Math.round(progress * 100)}%` : 'Processing…'}
             </button>
             {versions.map((v) => (
               <div className="audit-row" key={v.id}>
@@ -691,7 +746,10 @@ export function LinkDetail() {
                   )}
                 </div>
                 <div className="muted num" style={{ fontSize: '0.8rem' }}>
-                  {v.originalName} · {plural(v.pageCount, 'page')} · {fmtSize(v.sizeBytes)} · {fmtDate(v.uploadedAt)}
+                  {(v.files?.length ? v.files : [{ variant: 'desktop' as const, originalName: v.originalName, pageCount: v.pageCount, sizeBytes: v.sizeBytes }])
+                    .map((f) => `${v.files?.length > 1 ? (f.variant === 'mobile' ? 'Mobile' : 'Desktop') + ': ' : ''}${f.originalName} (${plural(f.pageCount, 'page')}, ${fmtSize(f.sizeBytes)})`)
+                    .join(' · ')}{' '}
+                  · {fmtDate(v.uploadedAt)}
                   {v.note ? ` · ${v.note}` : ''}
                 </div>
               </div>

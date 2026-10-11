@@ -41,7 +41,8 @@ Slugs that collide with application paths are reserved (`app`, `api`, `health`, 
 2. `pdftoppm` renders each page with its long side scaled to 1800 px (JPEG, or PNG when a stamp must be applied so the image is compressed only once).
 3. **Stamp** (if the link has a recipient and stamping is on): `sharp` composites a rounded light-gray box (`#E5E7EB`) with bold red text (`#C62828`), `Confidential — for <recipient>`, into the top-right corner. Size scales with page width; the text uses DejaVu Sans so non-ASCII names render.
 4. Pages are stored under `DATA_DIR/docs/<linkId>/v<n>/pages/<page>.jpg`; the original stays next to them as `original.pdf`.
-5. Changing the recipient or the stamp setting re-renders **all** versions from the stored originals (rendered into `pages.new`, then swapped in).
+5. A version can hold a second PDF rendered the same way into `v<n>/mobile/`. The viewer picks the variant on the server: phones (by user-agent) get `mobile` when it exists, everything else gets `desktop`; `?view=mobile|desktop` overrides. Versions carry unchanged variants over from the live version when only one file is replaced.
+6. Changing the recipient or the stamp setting re-renders **all** versions from the stored originals (rendered into `pages.new`, then swapped in).
 
 The viewer is a plain HTML page with a small inline script (nonce-based CSP): pages are lazy-loaded images, right-click and dragging are disabled, printing is blocked. None of this stops a determined person; it removes the casual "save as".
 
@@ -50,7 +51,7 @@ The viewer is a plain HTML page with a small inline script (nonce-based CSP): pa
 - `users` – role (`admin`/`user`), Argon2id hash, optional TOTP secret (AES-256-GCM encrypted) with replay guard, theme, forced-change flag
 - `sessions` – hashed tokens, expiry; `audit_log` – admin and security events
 - `links` – slug, kind (`file`/`url`), title, **recipient**, tags, stamp flag, password hash, expiry, view limit, current version
-- `link_versions`, `link_pages` – stored versions and page dimensions
+- `link_versions` – stored versions; `version_files` – up to two PDFs per version (`desktop`, which is also the default for every device, and an optional `mobile`); `link_pages` – page dimensions per variant
 - `views` – one row per visit (see below); `view_pages` – cumulative active time per page and visit
 - `settings` – system name and logo file names
 
@@ -64,6 +65,7 @@ A **view** is one load of a link's page. By default these are excluded from ever
 | Returning visitor | A visitor with more than one view in the selected range |
 | **Active time** | Time the tab was visible **and** the visitor interacted within the last 120 s |
 | Open time | Wall-clock time the page stayed open |
+| Layout | The variant (`desktop`/`mobile`) that served the visit; page numbers, depth and *completed* refer to that variant's page count |
 | Deepest page | Highest page that crossed the middle of the screen |
 | Time per page | Active time attributed to the page in view |
 | Completed | Deepest page ≥ page count |

@@ -11,7 +11,7 @@ import { pool } from '../db.js';
 import { verifyPassword } from '../passwords.js';
 import { slugSchema } from '../slug.js';
 import { parseUA } from '../ua.js';
-import { ogPath, pagePath } from '../storage.js';
+import { type Variant, ogPath, pagePath } from '../storage.js';
 import { notFoundPage, unlockPage, viewerPage } from '../viewer.js';
 import { baseUrl } from './links.js';
 
@@ -30,7 +30,7 @@ const safeEq = (a: string, b: string): boolean => {
 const accessCookie = (linkId: string): string => `docs_acc_${linkId.slice(0, 8)}`;
 const accessSig = (l: { id: string; password_hash: string }, exp: number): string =>
   hmac(`acc:${l.id}:${l.password_hash.slice(-16)}:${exp}`);
-const imgSig = (linkId: string, versionNo: number, exp: number): string => hmac(`img:${linkId}:${versionNo}:${exp}`);
+const imgSig = (linkId: string, versionNo: number, variant: Variant, exp: number): string => hmac(`img:${linkId}:${versionNo}:${variant}:${exp}`);
 
 // Wrong-password throttle: 8 failures / 15 min per ip+slug.
 const unlockFails = new Map<string, { n: number; until: number }>();
@@ -91,7 +91,7 @@ function srcOf(req: FastifyRequest): string | null {
   return typeof v === 'string' && v.trim() ? v.trim().slice(0, 64) : null;
 }
 
-async function recordView(req: FastifyRequest, reply: FastifyReply, link: PublicLink): Promise<number> {
+async function recordView(req: FastifyRequest, reply: FastifyReply, link: PublicLink, variant: Variant = 'desktop'): Promise<number> {
   const ua = String(req.headers['user-agent'] ?? '').slice(0, 400);
   const h = (name: string) => {
     const v = req.headers[name];
@@ -133,14 +133,14 @@ async function recordView(req: FastifyRequest, reply: FastifyReply, link: Public
   const { rows } = await pool.query<{ id: string }>(
     `insert into views(link_id, version_id, ip_hash, country, region, city, latitude, longitude, timezone, user_agent,
                        referrer_url, referrer_host, src_tag, is_bot, is_owner_preview, visitor_id,
-                       browser, browser_ver, os, os_ver, device_type, in_app, lang)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) returning id`,
+                       browser, browser_ver, os, os_ver, device_type, in_app, lang, variant)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) returning id`,
     [
       link.id, link.version_id, ipHash(clientIp(req)), h('cf-ipcountry'), h('cf-region'), h('cf-ipcity'),
       num('cf-iplatitude'), num('cf-iplongitude'), h('cf-timezone'), ua, referer, refHost,
       typeof src === 'string' && src ? src.slice(0, 64) : null, isBot, ownerPreview, vid,
       parsed.browser, parsed.browserVer, parsed.os, parsed.osVer, parsed.device, parsed.inApp,
-      (h('accept-language') ?? '').split(',')[0].slice(0, 20) || null,
+      (h('accept-language') ?? '').split(',')[0].slice(0, 20) || null, variant,
     ],
   );
   return Number(rows[0].id);
@@ -173,7 +173,7 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
       if (!safeEq(d.t, trkSig(viewId))) return reply.code(403).send();
 
       const { rows } = await pool.query<{ page_count: number | null }>(
-        `select cv.page_count from views v left join link_versions cv on cv.id = v.version_id
+        `select cv.page_count from views v left join version_files cv on cv.version_id = v.version_id and cv.variant = v.variant
           where v.id = $1 and v.started_at > now() - interval '24 hours'`,
         [viewId],
       );
@@ -235,16 +235,16 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
 
   // Page images: signed, short-lived URLs embedded in the viewer HTML.
   app.get(
-    '/_p/:linkId/:ver/:n',
+    '/_p/:linkId/:ver/:variant/:n',
     { config: { rateLimit: { max: 2000, timeWindow: '1 minute' } } },
     async (req, reply) => {
       const p = z
-        .object({ linkId: z.string().uuid(), ver: z.coerce.number().int().positive(), n: z.coerce.number().int().positive() })
+        .object({ linkId: z.string().uuid(), ver: z.coerce.number().int().positive(), variant: z.enum(['desktop', 'mobile']), n: z.coerce.number().int().positive() })
         .safeParse(req.params);
       const q = z.object({ e: z.coerce.number().int(), t: z.string() }).safeParse(req.query);
       if (!p.success || !q.success) return reply.code(404).send();
-      if (q.data.e < Date.now() / 1000 || !safeEq(q.data.t, imgSig(p.data.linkId, p.data.ver, q.data.e))) return reply.code(403).send();
-      const file = pagePath(p.data.linkId, p.data.ver, p.data.n);
+      if (q.data.e < Date.now() / 1000 || !safeEq(q.data.t, imgSig(p.data.linkId, p.data.ver, p.data.variant, q.data.e))) return reply.code(403).send();
+      const file = pagePath(p.data.linkId, p.data.ver, p.data.n, p.data.variant);
       try {
         await access(file);
       } catch {
@@ -310,13 +310,20 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
       if (!ok) return html(reply, 200, unlockPage({ slug: link.slug, title: link.title, nonce, src: srcOf(req) }));
     }
 
+    // Pick the file for this device: the mobile PDF on phones when one exists, otherwise the default (desktop) file.
+    // `?view=mobile|desktop` forces a layout (handy for previewing).
+    const hasMobile =
+      (await pool.query("select 1 from version_files where version_id = $1 and variant = 'mobile'", [link.version_id])).rowCount === 1;
+    const forced = (req.query as { view?: string }).view;
+    const wantsMobile = forced === 'mobile' || forced === 'desktop' ? forced === 'mobile' : parseUA(String(req.headers['user-agent'] ?? '')).device === 'mobile';
+    const variant: Variant = wantsMobile && hasMobile ? 'mobile' : 'desktop';
     const pages = (
       await pool.query<{ width: number; height: number }>(
-        'select width, height from link_pages where version_id = $1 order by page_no',
-        [link.version_id],
+        'select width, height from link_pages where version_id = $1 and variant = $2 order by page_no',
+        [link.version_id, variant],
       )
     ).rows;
-    const viewId = await recordView(req, reply, link);
+    const viewId = await recordView(req, reply, link, variant);
     const exp = Math.floor(Date.now() / 1000) + IMG_TTL_S;
     const base = baseUrl(req);
     return html(
@@ -329,7 +336,8 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
         versionNo: link.version_no,
         pages,
         exp,
-        sig: imgSig(link.id, link.version_no, exp),
+        variant,
+        sig: imgSig(link.id, link.version_no, variant, exp),
         viewId,
         viewToken: trkSig(viewId),
         ogImage: link.password_hash ? null : `${base}/_og/${link.slug}.jpg`,

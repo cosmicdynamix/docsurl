@@ -233,12 +233,12 @@ ok "stats need auth" 401 "$(curl -s -o /dev/null -w '%{http_code}' "$B/api/links
 stampstat(){ # linkId versionNo -> "<red pixels> <gray pixels>" in the top-right region of page 1
   docker compose exec -T app node -e "
 const sharp=require('sharp');
-(async()=>{const f='/data/docs/$1/v$2/pages/1.jpg';const m=await sharp(f).metadata();
+(async()=>{const f='/data/docs/$1/v$2$3/pages/1.jpg';const m=await sharp(f).metadata();
 const reg=await sharp(f).extract({left:Math.round(m.width*0.45),top:0,width:Math.round(m.width*0.55),height:Math.round(m.height*0.12)}).raw().toBuffer({resolveWithObject:true});
 let red=0,gray=0;for(let i=0;i<reg.data.length;i+=reg.info.channels){const r=reg.data[i],g=reg.data[i+1],b=reg.data[i+2];if(r>150&&g<90&&b<90)red++;if(r>215&&r<240&&Math.abs(r-g)<8&&Math.abs(g-b)<12)gray++;}
 console.log(red+' '+gray);})()" | tr -d '\r\n'
 }
-stamped(){ local s; s=$(stampstat "$1" "$2"); set -- $s; if [ "$1" -gt 100 ] && [ "$2" -gt 1000 ]; then echo yes; else echo no; fi; }
+stamped(){ local s; s=$(stampstat "$1" "$2" "$3"); set -- $s; if [ "$1" -gt 100 ] && [ "$2" -gt 1000 ]; then echo yes; else echo no; fi; }
 ok "stamp: link with recipient is stamped (red text on gray box)" yes "$(stamped $SID 1)"
 ok "stamp: link without recipient is not stamped" no "$(stamped $OID 1)"
 ok "stamp: turn off" 200 "$(req $J PATCH /links/$SID '{"stamp":false}')"
@@ -378,6 +378,94 @@ ok "fresh login (admin)" 200 "$(req $JX POST /login "{\"email\":\"admin@x.com\",
 ok "fresh session works" 200 "$(req $JX GET /links)"
 psqlq "update sessions set expires_at = now() - interval '1 minute' where id = (select id from sessions order by created_at desc limit 1)" >/dev/null
 ok "an expired session is rejected" 401 "$(req $JX GET /links)"
+# ---------- desktop / mobile variants ----------
+cp /tmp/cdx-test2.pdf /tmp/cdx-desk.pdf; cp /tmp/cdx-test1.pdf /tmp/cdx-mob.pdf; cp /tmp/cdx-test1.pdf /tmp/cdx-desk2.pdf; cp /tmp/cdx-test2.pdf /tmp/cdx-mob2.pdf
+UA_IPAD='Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1'
+pages_for(){ curl -s -A "$1 PreviewBot/1.0" "$2" | grep -o 'class="pg"' | wc -l; } # flagged as a preview bot so these probes are not counted as real views
+ok "no files at all" 400 "$(mp $J /links -F kind=file -F title=Empty)"
+ok "invalid mobile PDF rejects the whole upload" 400 "$(mp $J /links -F kind=file -F title=Bad -F slug=badmobile -F desktop=@/tmp/cdx-desk.pdf -F mobile=@/tmp/cdx-fake.pdf)"
+ok "failed upload created no link" 404 "$(curl -s -o /dev/null -w '%{http_code}' $B/badmobile)"
+ok "failed upload left no temp files" 0 "$(docker compose exec -T app sh -c 'ls /data/tmp | wc -l' | tr -d '\r\n')"
+ok "create link with desktop + mobile PDFs" 200 "$(mp $J /links -F kind=file -F title=Responsive -F slug=responsive -F 'recipient=Dana' -F desktop=@/tmp/cdx-desk.pdf -F mobile=@/tmp/cdx-mob.pdf)"
+RID=$(sed -E 's/.*"id":"([^"]+)".*/\1/' /tmp/cdx-out)
+ok "link reports the mobile variant" 1 "$(curl -s -b $J $B/api/links/$RID | grep -c '"hasMobile":true,"mobilePageCount":3,"mobileName":"cdx-mob.pdf"')"
+ok "phone gets the mobile PDF (3 pages)" 3 "$(pages_for "$UA_IPHONE" $B/responsive)"
+ok "desktop browser gets the desktop PDF (5 pages)" 5 "$(pages_for "$UA_WIN" $B/responsive)"
+ok "tablet gets the desktop PDF" 5 "$(pages_for "$UA_IPAD" $B/responsive)"
+ok "?view=mobile forces mobile on a desktop browser" 3 "$(pages_for "$UA_WIN" "$B/responsive?view=mobile")"
+ok "?view=desktop forces desktop on a phone" 5 "$(pages_for "$UA_IPHONE" "$B/responsive?view=desktop")"
+ok "unknown ?view= falls back to the device" 3 "$(pages_for "$UA_IPHONE" "$B/responsive?view=bogus")"
+curl -s -A "$UA_IPHONE" $B/responsive > /tmp/cdx-resp-m.html
+MIMG=$(grep -o '/_p/[^"]*' /tmp/cdx-resp-m.html | head -1 | sed 's/&amp;/\&/g')
+ok "mobile page images use the mobile path" 1 "$(echo "$MIMG" | grep -c '/mobile/1?')"
+ok "mobile page image is served" 200 "$(curl -s -o /dev/null -w '%{http_code}' "$B$MIMG")"
+ok "a mobile signature cannot fetch the desktop image" 403 "$(curl -s -o /dev/null -w '%{http_code}' "$B$(echo "$MIMG" | sed 's#/mobile/#/desktop/#')")"
+ok "desktop pages are stamped" yes "$(stamped $RID 1 '')"
+ok "mobile pages are stamped too" yes "$(stamped $RID 1 /mobile)"
+ok "link preview image comes from the desktop file" 200 "$(curl -s -o /dev/null -w '%{http_code}' $B/_og/responsive.jpg)"
+# tracking per variant: the phone reads the whole 3-page mobile PDF, the desktop reaches page 4 of 5
+VIDM=$(grep -o 'id="trk" data-vid="[0-9]*"' /tmp/cdx-resp-m.html | grep -o '[0-9]*'); VTM=$(grep -o 'data-vt="[^"]*"' /tmp/cdx-resp-m.html | sed 's/data-vt="//; s/"//')
+ok "mobile beacon (page 5 does not exist in the mobile PDF)" 204 "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: text/plain' -d "{\"t\":\"$VTM\",\"a\":14000,\"o\":20000,\"p\":3,\"d\":{\"2\":7000,\"3\":7000,\"5\":1000}}" $B/_t/$VIDM)"
+curl -s -A "$UA_WIN" $B/responsive > /tmp/cdx-resp-d.html
+VIDD=$(grep -o 'id="trk" data-vid="[0-9]*"' /tmp/cdx-resp-d.html | grep -o '[0-9]*'); VTD=$(grep -o 'data-vt="[^"]*"' /tmp/cdx-resp-d.html | sed 's/data-vt="//; s/"//')
+ok "desktop beacon" 204 "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: text/plain' -d "{\"t\":\"$VTD\",\"a\":9000,\"o\":12000,\"p\":4,\"d\":{\"4\":9000}}" $B/_t/$VIDD)"
+RS=$(curl -s -b $J "$B/api/links/$RID/stats?range=30d")
+ok "stats: 2 views" 2 "$(echo "$RS" | sed -E 's/.*"summary":\{"views":([0-9]+).*/\1/')"
+ok "stats: finishing the mobile PDF counts as completed (3 of 3)" 1 "$(echo "$RS" | sed -E 's/.*"summary":\{[^}]*"completed":([0-9]+).*/\1/')"
+ok "stats: layouts shown" 1 "$(echo "$RS" | grep -c '"layouts":\[{"name":"desktop","views":1,"visitors":1},{"name":"mobile","views":1,"visitors":1}\]\|"layouts":\[{"name":"mobile","views":1,"visitors":1},{"name":"desktop","views":1,"visitors":1}\]')"
+ok "stats: default page report is the desktop PDF (5 pages)" 5 "$(echo "$RS" | grep -o '"pageNo":' | wc -l)"
+ok "stats: desktop page 4 reached by 1" 1 "$(echo "$RS" | grep -c '"pageNo":4,"reached":1,"avgDwellMs":9000')"
+RSM=$(curl -s -b $J "$B/api/links/$RID/stats?range=30d&variant=mobile")
+ok "stats: mobile page report has 3 pages" 3 "$(echo "$RSM" | grep -o '"pageNo":' | wc -l)"
+ok "stats: mobile page 2 dwell 7000" 1 "$(echo "$RSM" | grep -c '"pageNo":2,"reached":1,"avgDwellMs":7000')"
+ok "stats: mobile report ignores page 5" 0 "$(echo "$RSM" | grep -c '"pageNo":5')"
+ok "stats: by-version breakdown knows about the mobile file" 1 "$(echo "$RS" | grep -c '"hasMobile":true')"
+ok "visit list marks the layout" 200 "$(req $J GET "/links/$RID/views?range=30d")"
+ok "visit list has a mobile-layout visit" 1 "$(grep -c '"variant":"mobile"' /tmp/cdx-out)"
+# replace only the desktop file: the mobile one is carried over
+ok "replace desktop only" 200 "$(mp $J /links/$RID/versions -F note=new-desktop -F desktop=@/tmp/cdx-desk2.pdf)"
+curl -s -b $J $B/api/links/$RID > /tmp/cdx-rv.json
+ok "v2 has the new desktop and the carried-over mobile" 1 "$(grep -o '"versionNo":2[^]]*"files":\[[^]]*\]' /tmp/cdx-rv.json | grep -c 'cdx-desk2.pdf.*cdx-mob.pdf\|cdx-mob.pdf.*cdx-desk2.pdf')"
+ok "mobile files were copied into v2" 1 "$(docker compose exec -T app sh -c "ls /data/docs/$RID/v2/mobile/original.pdf /data/docs/$RID/v2/mobile/pages/1.jpg >/dev/null 2>&1 && echo 1 || echo 0" | tr -d '\r\n')"
+ok "carried-over mobile pages are still stamped" yes "$(stamped $RID 2 /mobile)"
+ok "phone still gets the mobile PDF after replacing the desktop one" 3 "$(pages_for "$UA_IPHONE" $B/responsive)"
+ok "desktop now shows the new desktop file (3 pages)" 3 "$(pages_for "$UA_WIN" $B/responsive)"
+# changing the recipient re-renders both variants of both versions
+ok "clear the recipient" 200 "$(req $J PATCH /links/$RID '{"recipient":null}')"
+ok "no stamp on desktop v1" no "$(stamped $RID 1 '')"
+ok "no stamp on mobile v1" no "$(stamped $RID 1 /mobile)"
+ok "no stamp on mobile v2" no "$(stamped $RID 2 /mobile)"
+ok "set the recipient again" 200 "$(req $J PATCH /links/$RID '{"recipient":"Dana"}')"
+ok "mobile v1 stamped again" yes "$(stamped $RID 1 /mobile)"
+ok "desktop v2 stamped again" yes "$(stamped $RID 2 '')"
+# replace only the mobile file
+ok "replace mobile only" 200 "$(mp $J /links/$RID/versions -F mobile=@/tmp/cdx-mob2.pdf)"
+curl -s -b $J $B/api/links/$RID > /tmp/cdx-rv.json
+ok "v3 has the carried-over desktop and the new mobile" 1 "$(grep -o '"versionNo":3[^]]*"files":\[[^]]*\]' /tmp/cdx-rv.json | grep -c 'cdx-desk2.pdf.*cdx-mob2.pdf\|cdx-mob2.pdf.*cdx-desk2.pdf')"
+ok "phone gets the new 5-page mobile PDF" 5 "$(pages_for "$UA_IPHONE" $B/responsive)"
+# roll back to v1: both variants come back
+V1R=$(grep -o '"id":"[^"]*","versionNo":1' /tmp/cdx-rv.json | sed -E 's/"id":"([^"]+)".*/\1/')
+ok "roll back to v1" 200 "$(req $J POST /links/$RID/versions/$V1R/activate)"
+ok "v1 phone layout (3 pages)" 3 "$(pages_for "$UA_IPHONE" $B/responsive)"
+ok "v1 desktop layout (5 pages)" 5 "$(pages_for "$UA_WIN" $B/responsive)"
+# remove the mobile file: everyone gets the desktop file
+ok "nothing to change is rejected" 400 "$(mp $J /links/$RID/versions -F note=nothing)"
+ok "remove the mobile PDF (new version)" 200 "$(mp $J /links/$RID/versions -F removeMobile=1)"
+curl -s -b $J $B/api/links/$RID > /tmp/cdx-rv.json
+ok "the live version no longer has a mobile PDF" 1 "$(grep -c '"hasMobile":false' /tmp/cdx-rv.json | head -1)"
+ok "no mobile files on disk for the new version" 0 "$(docker compose exec -T app sh -c "ls -d /data/docs/$RID/v4/mobile 2>/dev/null | wc -l" | tr -d '\r\n')"
+ok "phone now gets the desktop PDF" 5 "$(pages_for "$UA_IPHONE" $B/responsive)"
+ok "?view=mobile without a mobile PDF falls back to desktop" 5 "$(pages_for "$UA_IPHONE" "$B/responsive?view=mobile")"
+ok "older versions keep their mobile PDF" 1 "$(grep -o '"versionNo":1[^]]*"files":\[[^]]*\]' /tmp/cdx-rv.json | grep -c 'mobile')"
+# a single uploaded file works everywhere, whichever slot it came from
+ok "single file sent as the mobile slot" 200 "$(mp $J /links -F kind=file -F title=Single -F slug=single-m -F mobile=@/tmp/cdx-test2.pdf)"
+SMID=$(sed -E 's/.*"id":"([^"]+)".*/\1/' /tmp/cdx-out)
+ok "a single file is the default for every device (no mobile variant)" 1 "$(curl -s -b $J $B/api/links/$SMID | grep -c '"hasMobile":false')"
+ok "single file: phone sees it" 5 "$(pages_for "$UA_IPHONE" $B/single-m)"
+ok "single file: desktop sees it" 5 "$(pages_for "$UA_WIN" $B/single-m)"
+ok "single file: stored as the default variant on disk" 1 "$(docker compose exec -T app sh -c "ls /data/docs/$SMID/v1/original.pdf >/dev/null 2>&1 && ! [ -d /data/docs/$SMID/v1/mobile ] && echo 1 || echo 0" | tr -d '\r\n')"
+ok "deleting the link removes both variants" 200 "$(req $J DELETE /links/$RID)"
+ok "variant files removed from disk" 0 "$(docker compose exec -T app sh -c "ls /data/docs/$RID 2>/dev/null | wc -l" | tr -d '\r\n')"
 ok "logout" 200 "$(req $J POST /logout)"
 ok "after logout unauth" 401 "$(req $J GET /users)"
 echo; echo "passed=$pass failed=$failn"

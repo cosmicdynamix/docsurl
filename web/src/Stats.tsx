@@ -56,6 +56,7 @@ interface Session {
   isOwner?: boolean;
   visitor?: string;
   visitNo?: number;
+  variant?: string;
   title?: string;
   recipient?: string | null;
   linkId?: string;
@@ -206,6 +207,7 @@ function SessionCard({ s, showLink, linkId, urlKind }: { s: Session; showLink?: 
       </div>
       <div className="row num" style={{ fontSize: '0.85rem', gap: 6 }}>
         <span className="badge">{s.source}</span>
+        {s.variant === 'mobile' ? <span className="badge">Mobile PDF</span> : null}
         {linkId && s.visitor ? (
           <Link to={`/links/${linkId}/visitors/${s.visitor}`}>
             <span className="badge">Visitor {s.visitor.slice(0, 6)}</span>
@@ -279,6 +281,8 @@ interface LinkStatsData {
   oses: Row[];
   devices: Row[];
   languages: Row[];
+  layouts: Row[];
+  pageVariant: string;
   sources: Row[];
   referrers: Row[];
   tags: Row[];
@@ -309,6 +313,7 @@ interface VisitorRow {
 export function LinkStats() {
   const { id } = useParams();
   const [version, setVersion] = useState('all');
+  const [pageVariant, setPageVariant] = useState<'desktop' | 'mobile'>('desktop');
   const [versionList, setVersionList] = useState<{ id: string; versionNo: number; current: boolean }[]>([]);
   const [visitors, setVisitors] = useState<VisitorRow[]>([]);
   const [range, setRange] = useState('30d');
@@ -321,8 +326,8 @@ export function LinkStats() {
   const [loading, setLoading] = useState(false);
 
   const qs = useMemo(
-    () => `range=${range}&tz=${encodeURIComponent(tz())}&bots=${bots ? 1 : 0}&owner=${owner ? 1 : 0}${version !== 'all' ? `&version=${version}` : ''}`,
-    [range, bots, owner, version],
+    () => `range=${range}&tz=${encodeURIComponent(tz())}&bots=${bots ? 1 : 0}&owner=${owner ? 1 : 0}${version !== 'all' ? `&version=${version}` : ''}&variant=${pageVariant}`,
+    [range, bots, owner, version, pageVariant],
   );
 
   useEffect(() => {
@@ -489,7 +494,17 @@ export function LinkStats() {
 
           {link?.kind === 'file' && (
             <Section title="Pages">
-              <PagesChart pages={data.pages} totalViews={s.views} />
+              {data.layouts.some((r) => r.name === 'mobile') && (
+                <div className="seg" role="group" aria-label="Layout" style={{ marginBottom: 12 }}>
+                  <button className={pageVariant === 'desktop' ? 'on' : ''} onClick={() => setPageVariant('desktop')}>
+                    Desktop PDF
+                  </button>
+                  <button className={pageVariant === 'mobile' ? 'on' : ''} onClick={() => setPageVariant('mobile')}>
+                    Mobile PDF
+                  </button>
+                </div>
+              )}
+              <PagesChart pages={data.pages} totalViews={data.layouts.find((r) => r.name === pageVariant)?.views ?? s.views} />
             </Section>
           )}
 
@@ -523,6 +538,13 @@ export function LinkStats() {
           </Section>
 
           <Section title="Devices and browsers">
+            {data.layouts.length > 1 && (
+              <>
+                <h3>PDF layout shown</h3>
+                <Bars rows={data.layouts.map((r) => ({ ...r, name: r.name === 'mobile' ? 'Mobile PDF' : 'Desktop PDF' }))} />
+                <h3 style={{ marginTop: 14 }}>Device</h3>
+              </>
+            )}
             <h3>Device</h3>
             <Bars rows={data.devices} />
             <h3 style={{ marginTop: 14 }}>Browser</h3>
