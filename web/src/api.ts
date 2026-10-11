@@ -67,6 +67,7 @@ const MESSAGES: Record<string, string> = {
   logo_too_large: 'The logo file is too large (1 MB maximum, 512 KB for SVG).',
   logo_bad_format: 'Unsupported logo format. Use PNG, JPEG, WebP, GIF or SVG.',
   not_an_svg: 'The file is not a valid SVG.',
+  icon_too_small: 'The app icon must be at least 192 x 192 pixels (512 x 512 recommended).',
   svg_unsafe: 'This SVG contains scripts or active content and cannot be used.',
   svg_external_reference: 'This SVG references external or embedded resources. Export it as a plain vector SVG, or upload a PNG.',
   bad_origin: 'Request blocked (origin mismatch). Reload the page and try again.',

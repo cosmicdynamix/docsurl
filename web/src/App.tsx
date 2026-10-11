@@ -682,6 +682,73 @@ function LogoSlot({ variant, title, hint, has, otherHas }: { variant: 'dark' | '
   );
 }
 
+function AppIconCard() {
+  const { version, hasAppIcon, set } = useBranding();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function upload(file: File) {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      set(await apiForm<Branding>('/settings/app-icon', fd));
+      setMsg({ ok: true, text: 'App icon updated. Re-add the app to your home screen to see it on a phone.' });
+    } catch (x) {
+      setMsg({ ok: false, text: errorMessage(x) });
+    }
+    setBusy(false);
+  }
+  async function remove() {
+    setBusy(true);
+    try {
+      set(await api<Branding>('DELETE', '/settings/app-icon'));
+      setMsg({ ok: true, text: 'App icon removed.' });
+    } catch (x) {
+      setMsg({ ok: false, text: errorMessage(x) });
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div className="card stack">
+      <h2>App icon (home screen)</h2>
+      <p className="muted" style={{ margin: 0 }}>
+        Used when the panel is added to a phone's home screen (Share, then Add to Home Screen) and as the icon for shared links. Upload a square PNG, JPEG or WebP of at least 512 x 512 pixels; transparent areas are filled
+        with a dark background.
+      </p>
+      <div className="logo-preview dark">
+        <img src={`/brand/icon/192?v=${version}`} alt="App icon preview" style={{ height: 96, width: 96, borderRadius: 20 }} />
+      </div>
+      {!hasAppIcon && <p className="muted">No icon uploaded; a neutral placeholder is used.</p>}
+      {msg && <Alert kind={msg.ok ? 'ok' : 'bad'}>{msg.text}</Alert>}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void upload(f);
+          e.target.value = '';
+        }}
+      />
+      <div className="row">
+        <button className="primary" disabled={busy} onClick={() => fileRef.current?.click()}>
+          {hasAppIcon ? 'Replace icon' : 'Upload icon'}
+        </button>
+        {hasAppIcon && (
+          <button className="danger" disabled={busy} onClick={remove}>
+            Remove
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Settings() {
   const b = useBranding();
   const [name, setName] = useState(b.siteName);
@@ -722,6 +789,7 @@ function Settings() {
         has={b.hasLogoLight}
         otherHas={b.hasLogoDark}
       />
+      <AppIconCard />
     </>
   );
 }

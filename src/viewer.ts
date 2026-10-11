@@ -42,6 +42,7 @@ function shell(opts: { title: string; head?: string; body: string; nonce: string
 <title>${esc(opts.title)}</title>
 <link rel="icon" href="/brand/logo/light?v=${getBranding().version}" media="(prefers-color-scheme: light)">
 <link rel="icon" href="/brand/logo/dark?v=${getBranding().version}" media="(prefers-color-scheme: dark)">
+<link rel="apple-touch-icon" href="/brand/icon/180?v=${getBranding().version}">
 ${opts.head ?? ''}
 <style nonce="${opts.nonce}">${BASE_CSS}</style>
 </head><body>${opts.body}</body></html>`;

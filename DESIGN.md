@@ -31,7 +31,7 @@ Browser ──▶ reverse proxy (TLS) ──▶ app (Fastify, one container) ─
 | Page images | `/_p/<link>/<version>/<n>?e=&t=` | HMAC-signed, 1 hour lifetime |
 | Preview image | `/_og/<slug>.jpg` | Small first page for chat-app link cards; never stamped; hidden for password links |
 | Engagement beacon | `POST /_t/<viewId>` | HMAC token per view |
-| Branding | `GET /api/branding`, `/brand/logo/{dark,light}` | Public (needed on the sign-in and viewer pages) |
+| Branding | `GET /api/branding`, `/brand/logo/{dark,light}`, `/brand/icon/{180,192,512}`, `/manifest.webmanifest` | Public (needed on the sign-in and viewer pages) |
 
 Slugs that collide with application paths are reserved (`app`, `api`, `health`, `brand`, …).
 
@@ -53,7 +53,7 @@ The viewer is a plain HTML page with a small inline script (nonce-based CSP): pa
 - `links` – slug, kind (`file`/`url`), title, **recipient**, tags, stamp flag, password hash, expiry, view limit, current version
 - `link_versions` – stored versions; `version_files` – up to two PDFs per version (`desktop`, which is also the default for every device, and an optional `mobile`); `link_pages` – page dimensions per variant
 - `views` – one row per visit (see below); `view_pages` – cumulative active time per page and visit
-- `settings` – system name and logo file names
+- `settings` – system name, logo and app-icon file names
 
 ## 5. Analytics definitions
 

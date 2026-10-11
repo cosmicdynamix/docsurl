@@ -4,6 +4,7 @@ export interface Branding {
   siteName: string;
   hasLogoDark: boolean;
   hasLogoLight: boolean;
+  hasAppIcon?: boolean;
   version: number;
 }
 
@@ -29,6 +30,11 @@ function setFavicons(version: number): void {
     l.setAttribute('data-brand-icon', '');
     document.head.appendChild(l);
   }
+  const a = document.createElement('link');
+  a.rel = 'apple-touch-icon';
+  a.href = `/brand/icon/180?v=${version}`;
+  a.setAttribute('data-brand-icon', '');
+  document.head.appendChild(a);
 }
 
 export function BrandingProvider({ children }: { children: ReactNode }) {

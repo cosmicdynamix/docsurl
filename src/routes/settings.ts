@@ -11,6 +11,8 @@ const brandDir = path.join(path.resolve(config.dataDir), 'brand');
 const MAX_LOGO_BYTES = 1024 * 1024;
 const MAX_SVG_BYTES = 512 * 1024;
 const variantSchema = z.enum(['dark', 'light']);
+const ICON_SIZES = [180, 192, 512] as const;
+const ICON_BG = '#0B0D12';
 const MIME: Record<string, string> = { '.png': 'image/png', '.svg': 'image/svg+xml' };
 
 export const siteNameSchema = z.string().trim().min(1, 'System name is required').max(60, 'System name is too long');
@@ -36,9 +38,33 @@ async function removeLogoFiles(variant: string): Promise<void> {
   }
 }
 
+const iconFile = (size: number): string => `app-icon-${size}.png`;
+const defaultIcons = new Map<number, Buffer>();
+
+/** Neutral placeholder icon (the default logo mark on the dark brand background). */
+async function defaultIcon(size: number): Promise<Buffer> {
+  let out = defaultIcons.get(size);
+  if (!out) {
+    const svg = await readFile(path.join(path.resolve(config.webDir), 'brand', 'default-dark.svg'));
+    const mark = await sharp(svg, { density: 600 }).resize(Math.round(size * 0.56), Math.round(size * 0.56)).png().toBuffer();
+    out = await sharp({ create: { width: size, height: size, channels: 4, background: ICON_BG } })
+      .composite([{ input: mark, gravity: 'center' }])
+      .png()
+      .toBuffer();
+    defaultIcons.set(size, out);
+  }
+  return out;
+}
+
+async function removeIconFiles(): Promise<void> {
+  for (const s of ICON_SIZES) await rm(path.join(brandDir, iconFile(s)), { force: true });
+}
+
+export const manifestShortName = (name: string): string => (name.length > 12 ? name.slice(0, 12).trimEnd() : name);
+
 const publicBranding = () => {
   const b = getBranding();
-  return { siteName: b.siteName, hasLogoDark: !!b.logoDark, hasLogoLight: !!b.logoLight, version: b.version };
+  return { siteName: b.siteName, hasLogoDark: !!b.logoDark, hasLogoLight: !!b.logoLight, version: b.version, hasAppIcon: !!b.appIcon };
 };
 
 export async function settingsRoutes(app: FastifyInstance): Promise<void> {
@@ -68,6 +94,37 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       .header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox")
       .header('Cache-Control', 'public, max-age=3600')
       .send(body);
+  });
+
+  // Public: the web app manifest and the home-screen icons ("Add to Home Screen" / "Install app").
+  app.get('/manifest.webmanifest', async (_req, reply) => {
+    const b = getBranding();
+    const icons = [192, 512].map((s) => ({ src: `/brand/icon/${s}?v=${b.version}`, sizes: `${s}x${s}`, type: 'image/png', purpose: 'any' }));
+    return reply
+      .header('Content-Type', 'application/manifest+json')
+      .header('Cache-Control', 'public, max-age=300')
+      .send({
+        name: b.siteName,
+        short_name: manifestShortName(b.siteName),
+        start_url: '/app/',
+        scope: '/app/',
+        display: 'standalone',
+        background_color: ICON_BG,
+        theme_color: ICON_BG,
+        icons,
+      });
+  });
+
+  app.get('/brand/icon/:size', async (req, reply) => {
+    const size = Number((req.params as { size: string }).size);
+    if (!(ICON_SIZES as readonly number[]).includes(size)) return reply.code(404).send();
+    let body: Buffer;
+    try {
+      body = getBranding().appIcon ? await readFile(path.join(brandDir, iconFile(size))) : await defaultIcon(size);
+    } catch {
+      body = await defaultIcon(size);
+    }
+    return reply.header('Content-Type', 'image/png').header('X-Content-Type-Options', 'nosniff').header('Cache-Control', 'public, max-age=3600').send(body);
   });
 
   app.get('/api/settings', { preHandler: requireAdmin }, async () => publicBranding());
@@ -120,6 +177,45 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     await writeFile(path.join(brandDir, name), out);
     await setSetting(`logo_${v.data}`, name);
     await audit(req, 'settings.logo_uploaded', 'settings', `logo_${v.data}`, { bytes: out.length, type: ext });
+    return publicBranding();
+  });
+
+  app.post('/api/settings/app-icon', { preHandler: requireAdmin }, async (req, reply) => {
+    if (!req.isMultipart()) return reply.code(400).send({ error: 'file_required' });
+    let buf: Buffer;
+    try {
+      const file = await req.file({ limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
+      if (!file) return reply.code(400).send({ error: 'file_required' });
+      buf = await file.toBuffer();
+    } catch {
+      return reply.code(413).send({ error: 'logo_too_large' });
+    }
+    const outputs = new Map<number, Buffer>();
+    try {
+      const meta = await sharp(buf, { limitInputPixels: 50_000_000 }).metadata();
+      if (!meta.format || !['png', 'jpeg', 'webp', 'gif'].includes(meta.format)) return reply.code(400).send({ error: 'logo_bad_format' });
+      if ((meta.width ?? 0) < 192 || (meta.height ?? 0) < 192) return reply.code(400).send({ error: 'icon_too_small' });
+      for (const s of ICON_SIZES) {
+        // Cover-crop to a square; flatten onto the brand background because iOS renders transparency as black.
+        outputs.set(
+          s,
+          await sharp(buf, { limitInputPixels: 50_000_000 }).rotate().resize(s, s, { fit: 'cover' }).flatten({ background: ICON_BG }).png().toBuffer(),
+        );
+      }
+    } catch {
+      return reply.code(400).send({ error: 'logo_bad_format' });
+    }
+    await mkdir(brandDir, { recursive: true });
+    for (const [s, out] of outputs) await writeFile(path.join(brandDir, iconFile(s)), out);
+    await setSetting('app_icon', iconFile(512));
+    await audit(req, 'settings.app_icon_uploaded', 'settings', 'app_icon');
+    return publicBranding();
+  });
+
+  app.delete('/api/settings/app-icon', { preHandler: requireAdmin }, async (req) => {
+    await removeIconFiles();
+    await setSetting('app_icon', null);
+    await audit(req, 'settings.app_icon_removed', 'settings', 'app_icon');
     return publicBranding();
   });
 
