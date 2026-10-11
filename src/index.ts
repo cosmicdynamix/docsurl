@@ -1,13 +1,14 @@
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import cookie from '@fastify/cookie';
 import formbody from '@fastify/formbody';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
-import Fastify from 'fastify';
+import Fastify, { type FastifyReply } from 'fastify';
 import { CSRF_COOKIE, loadSessionUser } from './auth.js';
-import { loadBranding } from './branding.js';
+import { getBranding, loadBranding } from './branding.js';
 import { config } from './config.js';
 import { randomToken } from './crypto.js';
 import { migrate, pool, waitForDb } from './db.js';
@@ -19,6 +20,7 @@ import { settingsRoutes } from './routes/settings.js';
 import { statsRoutes } from './routes/stats.js';
 import { userRoutes } from './routes/users.js';
 import { ensureStorage } from './storage.js';
+import { esc } from './viewer.js';
 
 const app = Fastify({ logger: { level: 'info' }, trustProxy: config.trustProxy, bodyLimit: 1024 * 1024 });
 
@@ -112,12 +114,25 @@ if (existsSync(webDir)) {
     prefix: '/app/',
     wildcard: false,
     maxAge: '1h',
+    index: false,
     setHeaders: (reply) => {
       reply.header('Content-Security-Policy', PANEL_CSP);
     },
   });
   app.get('/app', async (_req, reply) => reply.redirect('/app/'));
-  app.get('/app/*', async (_req, reply) => reply.sendFile('index.html'));
+  // The panel shell is rendered per request so iOS/Android read the current icon and name straight from the HTML
+  // (they do not run scripts when adding to the home screen), and so a changed icon is never served from cache.
+  const shellHtml = existsSync(path.join(webDir, 'index.html')) ? await readFile(path.join(webDir, 'index.html'), 'utf8') : '';
+  const panelShell = async (_req: unknown, reply: FastifyReply) => {
+    const b = getBranding();
+    const html = shellHtml
+      .replace('href="/brand/icon/180"', `href="/brand/icon/180?v=${b.version}"`)
+      .replace('href="/manifest.webmanifest"', `href="/manifest.webmanifest?v=${b.version}"`)
+      .replace('<title>Docs</title>', `<meta name="apple-mobile-web-app-title" content="${esc(b.siteName)}" />\n    <title>${esc(b.siteName)}</title>`);
+    return reply.header('Content-Type', 'text/html; charset=utf-8').header('Cache-Control', 'no-cache').header('Content-Security-Policy', PANEL_CSP).send(html);
+  };
+  app.get('/app/', panelShell);
+  app.get('/app/*', panelShell);
 } else {
   app.log.warn(`web dir ${webDir} not found; panel not served`);
 }
