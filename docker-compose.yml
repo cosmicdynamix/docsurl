@@ -1,0 +1,42 @@
+# Example stack: app + PostgreSQL. Put a TLS-terminating reverse proxy in front for production.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://docs:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/docs
+      APP_SECRET: ${APP_SECRET:?set APP_SECRET in .env}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
+      DATA_DIR: /data
+      TRUST_PROXY: ${TRUST_PROXY:-loopback,linklocal,uniquelocal}
+      CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-100}
+      MAX_PAGES: ${MAX_PAGES:-300}
+      SESSION_DAYS: ${SESSION_DAYS:-14}
+    volumes:
+      - docs-files:/data
+    ports:
+      - '3100:3000'
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: docs
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: docs
+    volumes:
+      - docs-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U docs -d docs']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  docs-pgdata:
+  docs-files:
