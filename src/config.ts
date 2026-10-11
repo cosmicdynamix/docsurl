@@ -23,7 +23,8 @@ export const config = {
   dataDir: process.env.DATA_DIR ?? '/data',
   maxUploadMb: Number(process.env.MAX_UPLOAD_MB ?? 100),
   maxPages: Number(process.env.MAX_PAGES ?? 300),
-  sessionDays: Number(process.env.SESSION_DAYS ?? 14),
+  // Sign-in lifetime; every visit restarts the window (sliding session).
+  sessionDays: Number(process.env.SESSION_DAYS ?? 30),
   webDir: process.env.WEB_DIR ?? 'web-dist',
   migrationsDir: process.env.MIGRATIONS_DIR ?? 'migrations',
 };

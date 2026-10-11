@@ -73,7 +73,7 @@ The viewer sends **cumulative totals** every 10 s and on page hide (`sendBeacon`
 
 ## 6. Security design
 
-- **Authentication**: Argon2id; throttled sign-in; fresh session on every login; sessions stored hashed; optional TOTP with replay protection; admins force a password change on created accounts.
+- **Authentication**: Argon2id; throttled sign-in; fresh session on every login; sessions stored hashed, 30-day sliding lifetime (each visit restarts it; password changes and disabling a user end other sessions); optional TOTP with replay protection; admins force a password change on created accounts.
 - **CSRF**: same-origin `Origin` check plus a double-submit token; `SameSite=Lax` cookies; `Secure` and HSTS when behind HTTPS.
 - **Authorization**: users only reach their own links; every link route re-checks ownership (admins excepted); stats and exports use the same check.
 - **Uploads**: type check by content, size/page limits, `pdftoppm` run with a timeout and no shell; logos are re-encoded (raster) or strictly validated (SVG: no scripts, event handlers, external references or `foreignObject`) and served with a sandbox CSP.

@@ -62,7 +62,7 @@ All settings are environment variables.
 | `DATA_DIR` | `/data` | Uploads, rendered pages and logos (mount a volume) |
 | `MAX_UPLOAD_MB` | `100` | Maximum PDF size |
 | `MAX_PAGES` | `300` | Maximum pages per PDF |
-| `SESSION_DAYS` | `14` | Sign-in lifetime |
+| `SESSION_DAYS` | `30` | Sign-in lifetime. It is a sliding window: every visit restarts it, so active users stay signed in |
 | `PORT` / `HOST` | `3000` / `0.0.0.0` | Listen address inside the container |
 
 ## Running in production

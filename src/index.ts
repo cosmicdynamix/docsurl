@@ -80,7 +80,7 @@ app.addHook('onRequest', async (req, reply) => {
     return reply.code(403).send({ error: 'bad_csrf' });
   }
 
-  req.user = await loadSessionUser(req);
+  req.user = await loadSessionUser(req, reply);
   if (req.user?.mustChangePassword && !ALLOWED_WHEN_MUST_CHANGE.has(urlPath)) {
     return reply.code(403).send({ error: 'must_change_password' });
   }

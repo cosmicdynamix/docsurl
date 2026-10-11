@@ -48,16 +48,31 @@ export function toSessionUser(r: UserRow): SessionUser {
   };
 }
 
-export async function loadSessionUser(req: FastifyRequest): Promise<SessionUser | null> {
+/**
+ * Sliding session: every time a signed-in user uses the app the lifetime restarts
+ * (default 30 days). To avoid a database write on every request we only renew once at
+ * least 10 minutes of the window have been used up. The cookie is renewed together with the row.
+ */
+async function slideSession(req: FastifyRequest, reply: FastifyReply, token: string, expiresAt: Date): Promise<void> {
+  const full = config.sessionDays * 86_400_000;
+  if (expiresAt.getTime() - Date.now() > full - 10 * 60_000) return;
+  const expires = new Date(Date.now() + full);
+  await pool.query('update sessions set expires_at = $2 where token_hash = $1', [sha256(token), expires]);
+  reply.setCookie(SESSION_COOKIE, token, { path: '/', httpOnly: true, sameSite: 'lax', secure: secureCookie(req), expires });
+}
+
+export async function loadSessionUser(req: FastifyRequest, reply?: FastifyReply): Promise<SessionUser | null> {
   const token = req.cookies[SESSION_COOKIE];
   if (!token) return null;
-  const { rows } = await pool.query<UserRow>(
-    `select u.id, u.email, u.display_name, u.role, u.theme, u.must_change_password, u.totp_enabled, u.totp_required
+  const { rows } = await pool.query<UserRow & { expires_at: Date }>(
+    `select u.id, u.email, u.display_name, u.role, u.theme, u.must_change_password, u.totp_enabled, u.totp_required, s.expires_at
        from sessions s join users u on u.id = s.user_id
       where s.token_hash = $1 and s.expires_at > now() and u.is_active`,
     [sha256(token)],
   );
-  return rows[0] ? toSessionUser(rows[0]) : null;
+  if (!rows[0]) return null;
+  if (reply) await slideSession(req, reply, token, rows[0].expires_at);
+  return toSessionUser(rows[0]);
 }
 
 export async function createSession(userId: string, req: FastifyRequest, reply: FastifyReply): Promise<void> {

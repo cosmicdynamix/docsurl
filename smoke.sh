@@ -360,6 +360,19 @@ rm -f /tmp/cdx-sec.jar; curl -s -o /dev/null -c /tmp/cdx-sec.jar -H 'X-Forwarded
 SECTOK=$(awk '$6=="docs_csrf"{print $7}' /tmp/cdx-sec.jar)
 ok "csrf cookie gets Secure over https" 1 "$(curl -s -D - -o /dev/null -H 'X-Forwarded-Proto: https' $B/api/me | grep -i '^set-cookie: docs_csrf' | grep -i -c 'secure')"
 ok "session cookie gets Secure over https" 1 "$(curl -s -D - -o /dev/null -H 'X-Forwarded-Proto: https' -H "Cookie: docs_csrf=$SECTOK" -H "x-csrf-token: $SECTOK" -H 'Content-Type: application/json' -d "{\"email\":\"admin@x.com\",\"password\":\"$PW\"}" $B/api/login | grep -i '^set-cookie: docs_session' | grep -i -c 'secure')"
+# ---------- sliding 30-day session ----------
+psqlq(){ docker compose exec -T db psql -U docs -d docs -tAc "$1" | tr -d ' \r\n'; }
+ok "new sessions last 30 days" t "$(psqlq "select min(expires_at) - now() > interval '29 days 23 hours' from sessions where created_at > now() - interval '10 minutes'")"
+psqlq "update sessions set expires_at = now() + interval '2 days'" >/dev/null
+ok "using the app renews the session cookie" 1 "$(curl -s -D - -o /dev/null -b $J $B/api/me | grep -i '^set-cookie: docs_session' | grep -i -c 'expires=')"
+ok "the session row is renewed to 30 days" t "$(psqlq "select count(*) = 1 from sessions where expires_at > now() + interval '29 days'")"
+ok "no cookie rewrite within 10 minutes" 0 "$(curl -s -D - -o /dev/null -b $J $B/api/me | grep -i -c '^set-cookie: docs_session')"
+ok "renewed session is still valid" 200 "$(req $J GET /links)"
+JX=/tmp/cdx-jx.jar; rm -f $JX; curl -s -o /dev/null -c $JX $B/api/me
+ok "fresh login (admin)" 200 "$(req $JX POST /login "{\"email\":\"admin@x.com\",\"password\":\"$PW\"}")"
+ok "fresh session works" 200 "$(req $JX GET /links)"
+psqlq "update sessions set expires_at = now() - interval '1 minute' where id = (select id from sessions order by created_at desc limit 1)" >/dev/null
+ok "an expired session is rejected" 401 "$(req $JX GET /links)"
 ok "logout" 200 "$(req $J POST /logout)"
 ok "after logout unauth" 401 "$(req $J GET /users)"
 echo; echo "passed=$pass failed=$failn"
