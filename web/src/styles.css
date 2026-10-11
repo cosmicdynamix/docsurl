@@ -252,6 +252,15 @@ button.danger {
   color: var(--bad);
   border-color: color-mix(in srgb, var(--bad) 45%, var(--border));
 }
+.link-actions {
+  gap: 6px;
+}
+.link-actions button.small {
+  min-height: 28px;
+  padding: 0 9px;
+  font-size: 0.78rem;
+  border-radius: 8px;
+}
 button.small {
   min-height: 36px;
   padding: 0 12px;

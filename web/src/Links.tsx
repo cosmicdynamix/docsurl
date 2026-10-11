@@ -159,9 +159,6 @@ export function LinksList({ admin }: { admin: boolean }) {
                 <b>{l.recipient}</b>
               </div>
             )}
-            <div className="muted" style={{ wordBreak: 'break-all' }}>
-              {url}
-            </div>
             <div className="row muted num" style={{ fontSize: '0.8rem' }}>
               <span>{l.kind === 'file' ? `PDF · ${plural(l.pageCount ?? 0, 'page')}${l.hasMobile ? ` + mobile ${plural(l.mobilePageCount ?? 0, 'page')}` : ''}` : 'Short URL'}</span>
               <span>· {plural(l.views, 'view')}</span>
@@ -169,8 +166,7 @@ export function LinksList({ admin }: { admin: boolean }) {
               {l.expiresAt && <span>· expires {fmtDate(l.expiresAt)}</span>}
               {admin && <span>· {l.ownerEmail}</span>}
             </div>
-            <Tags tags={l.tags} onPick={(t) => setTag(tag === t ? '' : t)} active={tag} />
-            <div className="row" style={{ marginTop: 6 }}>
+            <div className="row link-actions" style={{ marginTop: 6 }}>
               <button
                 className="small"
                 onClick={async () => {
