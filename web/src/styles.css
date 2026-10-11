@@ -58,6 +58,24 @@ body {
   line-height: 1.5;
   -webkit-text-size-adjust: 100%;
 }
+/* iOS home-screen app: pin the page to the physical viewport and scroll inside #root, so the
+   fixed tab bar sits at bottom: 0 with no "chin" gap (percentage/min heights leave one). */
+html,
+body {
+  height: 100vh;
+  overflow: hidden;
+}
+body {
+  position: fixed;
+  inset: 0;
+  padding: 0;
+}
+#root {
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior-y: none;
+  -webkit-overflow-scrolling: touch;
+}
 h1,
 h2,
 h3 {
@@ -113,7 +131,7 @@ a {
 
 /* layout: mobile first */
 .shell {
-  min-height: 100dvh;
+  min-height: 100%;
   padding-bottom: calc(68px + env(safe-area-inset-bottom));
 }
 .topbar {
