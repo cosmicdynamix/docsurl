@@ -53,7 +53,7 @@ app.setErrorHandler((err: Error & { statusCode?: number; code?: string }, req, r
 });
 
 // Paths a user may call while a forced password change is pending.
-const ALLOWED_WHEN_MUST_CHANGE = new Set(['/api/me', '/api/me/password', '/api/logout', '/api/health', '/api/branding']);
+const ALLOWED_WHEN_MUST_CHANGE = new Set(['/api/me', '/api/me/password', '/api/logout', '/api/health', '/api/branding', '/api/setup/status']);
 
 app.addHook('onRequest', async (req, reply) => {
   if (!req.url.startsWith('/api/')) return;

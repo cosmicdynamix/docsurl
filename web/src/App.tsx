@@ -51,7 +51,7 @@ export function App() {
   const refresh = useCallback(async () => {
     const [me, setup] = await Promise.all([
       api<{ user: User | null }>('GET', '/me'),
-      api<{ needsSetup: boolean; tokenRequired: boolean }>('GET', '/setup/status'),
+      api<{ needsSetup: boolean; tokenRequired: boolean }>('GET', '/setup/status').catch(() => ({ needsSetup: false, tokenRequired: false })),
     ]);
     if (me.user) applyTheme(me.user.theme);
     setState({ loading: false, user: me.user, needsSetup: setup.needsSetup, tokenRequired: setup.tokenRequired });
