@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ApiError, api, errorMessage } from './api';
+import { Signature, SignatureToggle, isEmptySig, useMySignature } from './Signature';
 
 export interface LinkItem {
   id: string;
@@ -11,6 +12,7 @@ export interface LinkItem {
   tags: string[];
   stamp: boolean;
   allowDownload: boolean;
+  signature: Signature | null;
   status: 'active' | 'disabled';
   effectiveStatus: 'active' | 'disabled' | 'expired';
   destinationUrl: string | null;
@@ -326,7 +328,8 @@ export function NewLink() {
   const nav = useNavigate();
   const known = useKnownTags();
   const [kind, setKind] = useState<'file' | 'url'>('file');
-  const [f, setF] = useState({ title: '', recipient: '', tags: '', stamp: true, allowDownload: false, slug: '', password: '', expiresAt: '', maxViews: '', destinationUrl: '' });
+  const mySig = useMySignature();
+  const [f, setF] = useState({ title: '', recipient: '', tags: '', stamp: true, allowDownload: false, sig: null as Signature | null, slug: '', password: '', expiresAt: '', maxViews: '', destinationUrl: '' });
   const [file, setFile] = useState<File | null>(null);
   const [mobileFile, setMobileFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
@@ -347,6 +350,7 @@ export function NewLink() {
         if (f.recipient) fd.append('recipient', f.recipient);
         fd.append('stamp', f.stamp ? '1' : '0');
         fd.append('allowDownload', f.allowDownload ? '1' : '0');
+        if (f.sig && !isEmptySig(f.sig)) fd.append('signature', JSON.stringify(f.sig));
         if (f.tags) fd.append('tags', parseTags(f.tags).join(','));
         if (f.slug) fd.append('slug', f.slug);
         if (f.password) fd.append('password', f.password);
@@ -423,6 +427,7 @@ export function NewLink() {
           allowDownload={kind === 'file' ? f.allowDownload : undefined}
           onAllowDownload={(v) => setF({ ...f, allowDownload: v })}
         />
+        {kind === 'file' && <SignatureToggle sig={f.sig} saved={mySig} onChange={(v) => setF({ ...f, sig: v })} />}
         <div>
           <label>Slug (link name, optional)</label>
           <input value={f.slug} placeholder="e.g. pitchdeck — generated if left empty" onChange={(e) => setF({ ...f, slug: e.target.value.toLowerCase() })} autoCapitalize="none" />
@@ -469,7 +474,8 @@ export function LinkDetail() {
   const nav = useNavigate();
   const known = useKnownTags();
   const [data, setData] = useState<{ link: LinkItem; versions: Version[]; url: string } | null>(null);
-  const [edit, setEdit] = useState({ title: '', recipient: '', tags: '', stamp: true, allowDownload: false, slug: '', expiresAt: '', maxViews: '', destinationUrl: '', password: '' });
+  const mySig = useMySignature();
+  const [edit, setEdit] = useState({ title: '', recipient: '', tags: '', stamp: true, allowDownload: false, sig: null as Signature | null, slug: '', expiresAt: '', maxViews: '', destinationUrl: '', password: '' });
   const [saving, setSaving] = useState(false);
   const [m, setM] = useState<{ ok: boolean; text: string } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -490,6 +496,7 @@ export function LinkDetail() {
       tags: r.link.tags.join(', '),
       stamp: r.link.stamp,
       allowDownload: r.link.allowDownload,
+      sig: r.link.signature,
       slug: r.link.slug,
       expiresAt: toLocalInput(r.link.expiresAt),
       maxViews: r.link.maxViews ? String(r.link.maxViews) : '',
@@ -524,7 +531,7 @@ export function LinkDetail() {
         title: edit.title,
         recipient: edit.recipient || null,
         tags: parseTags(edit.tags),
-        ...(link.kind === 'file' ? { stamp: edit.stamp, allowDownload: edit.allowDownload } : {}),
+        ...(link.kind === 'file' ? { stamp: edit.stamp, allowDownload: edit.allowDownload, signature: isEmptySig(edit.sig) ? null : edit.sig } : {}),
         slug: edit.slug,
         expiresAt: fromLocalInput(edit.expiresAt),
         maxViews: edit.maxViews ? Number(edit.maxViews) : null,
@@ -671,6 +678,7 @@ export function LinkDetail() {
           allowDownload={link.kind === 'file' ? edit.allowDownload : undefined}
           onAllowDownload={(v) => setEdit({ ...edit, allowDownload: v })}
         />
+        {link.kind === 'file' && <SignatureToggle sig={edit.sig} saved={mySig} onChange={(v) => setEdit({ ...edit, sig: v })} />}
         {link.kind === 'file' && (
           <p className="muted" style={{ fontSize: '0.8rem', margin: 0 }}>
             The stamp is burned into every page image. Changing the recipient or this option re-renders all versions (a few seconds).

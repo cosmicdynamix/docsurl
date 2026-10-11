@@ -1,4 +1,5 @@
 import { getBranding } from './branding.js';
+import type { Signature } from './signature.js';
 
 export const esc = (s: string): string =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -93,11 +94,33 @@ export interface ViewerOpts {
   sig: string;
   /** Signed download URL; present only when the link owner allowed downloads. */
   downloadUrl?: string | null;
+  /** Sender details shown as a footer under the pages; null = none. */
+  signature?: Signature | null;
   ogImage: string | null;
   pageUrl: string;
   viewId: number;
   viewToken: string;
   nonce: string;
+}
+
+/** Footer with the sender's details. Everything is escaped; only http(s), mailto and tel links are made clickable. */
+function signatureHtml(s: Signature | null | undefined): string {
+  if (!s) return '';
+  const who = [s.name, s.title].filter(Boolean).map((x) => esc(x!));
+  const lines: string[] = [];
+  if (who.length) lines.push(`<div class="sg-n">${who.length === 2 ? `<b>${who[0]}</b> · ${who[1]}` : `<b>${who[0]}</b>`}</div>`);
+  if (s.company) lines.push(`<div>${esc(s.company)}</div>`);
+  const contact: string[] = [];
+  if (s.email) contact.push(/^[^\s@<>"]+@[^\s@<>"]+$/.test(s.email) ? `<a href="mailto:${esc(s.email)}">${esc(s.email)}</a>` : esc(s.email));
+  if (s.phone) contact.push(/^[+\d][\d\s().-]{4,}$/.test(s.phone) ? `<a href="tel:${esc(s.phone.replace(/[^\d+]/g, ''))}">${esc(s.phone)}</a>` : esc(s.phone));
+  if (s.website) {
+    const w = s.website;
+    const href = /^https?:\/\//i.test(w) ? w : /^[a-z][a-z0-9+.-]*:/i.test(w) ? null : `https://${w}`;
+    contact.push(href ? `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(w.replace(/^https?:\/\//i, ''))}</a>` : esc(w));
+  }
+  if (contact.length) lines.push(`<div class="sg-c">${contact.join(' · ')}</div>`);
+  if (s.note) lines.push(`<div class="sg-t">${esc(s.note)}</div>`);
+  return lines.length ? `<footer class="sg">${lines.join('')}</footer>` : '';
 }
 
 export function viewerPage(o: ViewerOpts): string {
@@ -117,7 +140,10 @@ export function viewerPage(o: ViewerOpts): string {
 <meta name="twitter:card" content="${o.ogImage ? 'summary_large_image' : 'summary'}">
 ${o.ogImage ? `<meta property="og:image" content="${esc(o.ogImage)}">` : ''}`;
   const css = `
-.pgs{max-width:1100px;margin:0 auto;padding:10px 8px 80px}
+.pgs{max-width:1100px;margin:0 auto;padding:10px 8px 24px}
+.sg{max-width:1100px;margin:0 auto;padding:18px 16px calc(84px + env(safe-area-inset-bottom));border-top:1px solid var(--border);text-align:center;font-size:.85rem;line-height:1.6;color:var(--muted)}
+.sg b{color:var(--text)}.sg a{color:var(--accent);text-decoration:none}.sg-t{margin-top:4px;font-size:.8rem}
+.pgs.nosg{padding-bottom:80px}
 .pg{position:relative;width:100%;margin:0 0 10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;overflow:hidden}
 .pg img{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none;-webkit-user-drag:none;-webkit-touch-callout:none;user-select:none;opacity:0;transition:opacity .25s}
 .pg img.ok{opacity:1}
@@ -156,7 +182,7 @@ ${o.ogImage ? `<meta property="og:image" content="${esc(o.ogImage)}">` : ''}`;
     head: og,
     body: `<style nonce="${o.nonce}">${css}</style><div hidden id="trk" data-vid="${o.viewId}" data-vt="${o.viewToken}"></div>
 <div class="bar">${logos()}<span class="nm">${esc(getBranding().siteName)}</span><span class="t">${esc(o.title)}</span>${o.downloadUrl ? `<a class="dl" href="${esc(o.downloadUrl)}" download>Download PDF</a>` : ''}</div>
-<div class="pgs">${pages}</div><div class="ind" id="ind"></div>
+<div class="pgs${o.signature ? '' : ' nosg'}">${pages}</div>${signatureHtml(o.signature)}<div class="ind" id="ind"></div>
 <script nonce="${o.nonce}">${js}</script>`,
   });
 }

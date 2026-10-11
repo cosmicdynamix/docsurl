@@ -3,6 +3,7 @@ import { config } from './config.js';
 import { ipHash, randomToken, sha256 } from './crypto.js';
 import { clientIp, secureCookie } from './net.js';
 import { pool } from './db.js';
+import type { Signature } from './signature.js';
 
 export const SESSION_COOKIE = 'docs_session';
 export const CSRF_COOKIE = 'docs_csrf';
@@ -16,6 +17,7 @@ export interface SessionUser {
   mustChangePassword: boolean;
   totpEnabled: boolean;
   totpRequired: boolean;
+  signature: Signature | null;
 }
 
 declare module 'fastify' {
@@ -33,6 +35,7 @@ interface UserRow {
   must_change_password: boolean;
   totp_enabled: boolean;
   totp_required: boolean;
+  signature: Signature | null;
 }
 
 export function toSessionUser(r: UserRow): SessionUser {
@@ -45,6 +48,7 @@ export function toSessionUser(r: UserRow): SessionUser {
     mustChangePassword: r.must_change_password,
     totpEnabled: r.totp_enabled,
     totpRequired: r.totp_required,
+    signature: r.signature,
   };
 }
 
@@ -65,7 +69,7 @@ export async function loadSessionUser(req: FastifyRequest, reply?: FastifyReply)
   const token = req.cookies[SESSION_COOKIE];
   if (!token) return null;
   const { rows } = await pool.query<UserRow & { expires_at: Date }>(
-    `select u.id, u.email, u.display_name, u.role, u.theme, u.must_change_password, u.totp_enabled, u.totp_required, s.expires_at
+    `select u.id, u.email, u.display_name, u.role, u.theme, u.must_change_password, u.totp_enabled, u.totp_required, u.signature, s.expires_at
        from sessions s join users u on u.id = s.user_id
       where s.token_hash = $1 and s.expires_at > now() and u.is_active`,
     [sha256(token)],

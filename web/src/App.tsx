@@ -3,6 +3,7 @@ import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { ApiError, api, apiForm, errorMessage } from './api';
 import { Branding, Logo, useBranding } from './branding';
 import { LinkDetail, LinksList, NewLink } from './Links';
+import { Signature, SignatureFields, SignaturePreview, isEmptySig } from './Signature';
 import { LinkStats, StatsOverview, VisitorDetail } from './Stats';
 import { ThemePref, applyTheme } from './theme';
 
@@ -15,6 +16,7 @@ export interface User {
   mustChangePassword: boolean;
   totpEnabled: boolean;
   totpRequired: boolean;
+  signature: Signature | null;
 }
 
 function Alert({ kind, children }: { kind?: 'bad' | 'ok'; children: ReactNode }) {
@@ -463,6 +465,8 @@ function Audit() {
 function Account({ user, refresh }: { user: User; refresh: () => Promise<void> }) {
   const [name, setName] = useState(user.displayName);
   const [msg, setMsg] = useState('');
+  const [sig, setSig] = useState<Signature>(user.signature ?? {});
+  const [sigMsg, setSigMsg] = useState('');
 
   async function setTheme(theme: ThemePref) {
     applyTheme(theme);
@@ -473,6 +477,13 @@ function Account({ user, refresh }: { user: User; refresh: () => Promise<void> }
     e.preventDefault();
     await api('PATCH', '/me', { displayName: name });
     setMsg('Saved.');
+    await refresh();
+  }
+
+  async function saveSig(e: FormEvent) {
+    e.preventDefault();
+    await api('PATCH', '/me', { signature: isEmptySig(sig) ? null : sig });
+    setSigMsg('Saved.');
     await refresh();
   }
 
@@ -500,6 +511,16 @@ function Account({ user, refresh }: { user: User; refresh: () => Promise<void> }
         </div>
         {msg && <Alert kind="ok">{msg}</Alert>}
         <button>Save</button>
+      </form>
+      <form className="card stack" onSubmit={saveSig}>
+        <h2>Signature</h2>
+        <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
+          Short details about you or your company. When you create a link you can show them as a footer at the bottom of the document page. Everything here is optional, and you can edit it per link.
+        </p>
+        <SignatureFields value={sig} onChange={setSig} />
+        <SignaturePreview value={sig} />
+        {sigMsg && <Alert kind="ok">{sigMsg}</Alert>}
+        <button>Save signature</button>
       </form>
       <div className="card stack">
         <h2>Password</h2>

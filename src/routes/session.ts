@@ -15,6 +15,7 @@ import { config } from '../config.js';
 import { clientIp, purgeExpired } from '../net.js';
 import { verifyTotp } from '../totp.js';
 import { siteNameSchema } from './settings.js';
+import { signatureSchema } from '../signature.js';
 import { encrypt } from '../crypto.js';
 import { pool } from '../db.js';
 import { DUMMY_HASH, hashPassword, passwordSchema, verifyPassword } from '../passwords.js';
@@ -120,6 +121,7 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
       .object({
         displayName: z.string().trim().min(1).max(100).optional(),
         theme: z.enum(['dark', 'light', 'system']).optional(),
+        signature: signatureSchema.optional(), // null clears it
       })
       .safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'invalid' });
@@ -127,6 +129,11 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
       'update users set display_name = coalesce($2, display_name), theme = coalesce($3, theme) where id = $1',
       [req.user!.id, body.data.displayName ?? null, body.data.theme ?? null],
     );
+    if (body.data.signature !== undefined)
+      await pool.query('update users set signature = $2 where id = $1', [
+        req.user!.id,
+        body.data.signature ? JSON.stringify(body.data.signature) : null,
+      ]);
     return { ok: true };
   });
 

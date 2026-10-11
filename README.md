@@ -18,6 +18,7 @@ Upload a PDF, share one link, and see who opened it, from where, for how long, h
 - QR code per link, link-preview cards (Open Graph) for chat apps, tags and search
 
 **View-only viewer**
+- Each user can save a short **signature** (name, title, company, contact details, a note) under Account, and switch it on per link as a footer under the document; it is pre-filled and editable per link
 - Pages are rendered to images on the server; by default the original PDF and any download link are **never sent** to the visitor. Per link you can opt in to **Allow download** (a "Download PDF" button; stamped documents download as the stamped pages, so the stamp travels with the copy)
 - Image URLs are signed and short-lived; mobile-first, pinch-to-zoom, page indicator
 

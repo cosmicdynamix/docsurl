@@ -13,6 +13,7 @@ import { slugSchema } from '../slug.js';
 import { parseUA } from '../ua.js';
 import { imagesToPdf } from '../imagepdf.js';
 import { type Variant, ogPath, originalPath, pagePath } from '../storage.js';
+import type { Signature } from '../signature.js';
 import { notFoundPage, unlockPage, viewerPage } from '../viewer.js';
 import { baseUrl } from './links.js';
 
@@ -57,12 +58,13 @@ interface PublicLink {
   version_id: string | null;
   version_no: number | null;
   allow_download: boolean;
+  signature: Signature | null;
   active: boolean;
 }
 
 async function findLink(slug: string): Promise<PublicLink | null> {
   const { rows } = await pool.query<PublicLink>(
-    `select l.id, l.slug, l.kind, l.title, l.destination_url, l.password_hash, l.owner_id, l.allow_download,
+    `select l.id, l.slug, l.kind, l.title, l.destination_url, l.password_hash, l.owner_id, l.allow_download, l.signature,
             cv.id as version_id, cv.version_no,
             (l.status = 'active'
              and (l.expires_at is null or l.expires_at > now())
@@ -384,6 +386,7 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
         variant,
         sig: imgSig(link.id, link.version_no, variant, exp),
         downloadUrl: link.allow_download ? `/_d/${link.id}/${link.version_no}/${variant}?e=${exp}&t=${dlSig(link.id, link.version_no, variant, exp)}&v=${viewId}` : null,
+        signature: link.signature,
         viewId,
         viewToken: trkSig(viewId),
         ogImage: link.password_hash ? null : `${base}/_og/${link.slug}.jpg`,

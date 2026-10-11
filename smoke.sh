@@ -516,6 +516,27 @@ ok "turn download off" 200 "$(req $J PATCH /links/$PDID '{"allowDownload":false}
 ok "old download URL stops working" 404 "$(curl -s -o /dev/null -w '%{http_code}' "$B$PLU")"
 ok "viewer no longer shows it" 0 "$(curl -s -A "$UA_IPHONE PreviewBot/1.0" $B/dlplain | grep -c 'class="dl"')"
 ok "visitor detail names the link and recipient" 1 "$(VK=$(curl -s -b $J "$B/api/links/$DID/visitors?range=all&bots=1&owner=1" | grep -o '"key":"[0-9a-f]*"' | head -1 | sed 's/.*:"//;s/"//'); curl -s -b $J "$B/api/links/$DID/visitors/$VK?range=all&bots=1&owner=1" | grep -c '"link":{"id":"[^"]*","title":"Download Me","slug":"dlstamped","recipient":"Erin"')"
+# --- signature footer ---
+ok "no signature saved yet" 1 "$(curl -s -b $J $B/api/me | grep -c '"signature":null')"
+ok "save my signature" 200 "$(req $J PATCH /me '{"signature":{"name":"Jane Doe","title":"CEO","company":"Acme <b>Inc</b>","email":"jane@acme.com","phone":"+1 555 010 0000","website":"acme.com","note":"Please do not forward."}}')"
+ok "signature is returned with /me" 1 "$(curl -s -b $J $B/api/me | grep -c '"company":"Acme <b>Inc</b>"')"
+ok "oversized signature field rejected" 400 "$(req $J PATCH /me "{\"signature\":{\"name\":\"$(printf 'x%.0s' $(seq 1 120))\"}}")"
+ok "link without a signature has no footer" 0 "$(curl -s -A "$UA_IPHONE PreviewBot/1.0" $B/dlplain | grep -c 'class="sg"')"
+ok "create link with a signature" 200 "$(mp $J /links -F kind=file -F title='Signed' -F slug=signed -F 'signature={"name":"Jane Doe","company":"Acme <b>Inc</b>","website":"javascript:alert(1)","email":"jane@acme.com"}' -F file=@/tmp/cdx-test1.pdf)"
+SGID=$(sed -E 's/.*"id":"([^"]+)".*/\1/' /tmp/cdx-out)
+SGH=$(curl -s -A "$UA_IPHONE PreviewBot/1.0" $B/signed)
+ok "viewer shows the footer" 1 "$(echo "$SGH" | grep -c 'class="sg"')"
+ok "footer shows the name" 1 "$(echo "$SGH" | grep -c '<b>Jane Doe</b>')"
+ok "footer escapes HTML" 0 "$(echo "$SGH" | grep -c 'Acme <b>Inc')"
+ok "footer links the email" 1 "$(echo "$SGH" | grep -c 'href="mailto:jane@acme.com"')"
+ok "footer never makes a javascript: link" 0 "$(echo "$SGH" | grep -ci 'href="javascript')"
+ok "edit the link signature" 200 "$(req $J PATCH /links/$SGID '{"signature":{"name":"John Roe","website":"https://example.com/x"}}')"
+SGH=$(curl -s -A "$UA_IPHONE PreviewBot/1.0" $B/signed)
+ok "footer follows the edit" 1 "$(echo "$SGH" | grep -c '<b>John Roe</b>')"
+ok "website becomes a safe link" 1 "$(echo "$SGH" | grep -c 'href="https://example.com/x" target="_blank" rel="noopener noreferrer"')"
+ok "remove the link signature" 200 "$(req $J PATCH /links/$SGID '{"signature":null}')"
+ok "footer gone after removal" 0 "$(curl -s -A "$UA_IPHONE PreviewBot/1.0" $B/signed | grep -c 'class="sg"')"
+ok "clear my signature" 200 "$(req $J PATCH /me '{"signature":null}')"
 ok "deleting the link removes both variants" 200 "$(req $J DELETE /links/$RID)"
 ok "variant files removed from disk" 0 "$(docker compose exec -T app sh -c "ls /data/docs/$RID 2>/dev/null | wc -l" | tr -d '\r\n')"
 ok "logout" 200 "$(req $J POST /logout)"
