@@ -103,3 +103,11 @@ docker compose up -d --build        # app on :3100
 ## License
 
 GNU Affero General Public License v3.0 or later — see [LICENSE](LICENSE). If you run a modified version as a network service you must offer its source code to the users of that service.
+
+## Deploying on Coolify
+
+1. **New Resource → Public Repository** → `https://github.com/cosmicdynamix/docsurl`, branch `main`, build pack **Docker Compose**, compose file `/docker-compose.coolify.yml`.
+2. Set the **domain** on the `app` service (container port `3000`).
+3. Add the environment variables `APP_SECRET` (`openssl rand -hex 32`) and `SETUP_TOKEN` (any long random value). Behind Cloudflare also set `CLIENT_IP_HEADER=cf-connecting-ip`.
+4. Deploy, open `https://your-domain/app/`, finish the setup with your `SETUP_TOKEN`, then upload your logos in **Settings**.
+5. Add backups for the `docs-pgdata` and `docs-files` volumes.

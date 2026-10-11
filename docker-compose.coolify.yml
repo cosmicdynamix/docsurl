@@ -1,0 +1,47 @@
+# Compose file for Coolify (or any platform that injects a domain and secrets).
+# In Coolify: New Resource -> Public/Private Repository -> build pack "Docker Compose",
+# compose file "/docker-compose.coolify.yml", then set the domain on the "app" service (port 3000).
+#
+# Required environment variables (Coolify -> Environment Variables):
+#   APP_SECRET   64 hex characters      e.g. `openssl rand -hex 32`
+#   SETUP_TOKEN  any long random value  (only you can finish the first-run setup)
+# Optional: CLIENT_IP_HEADER=cf-connecting-ip   (only when ALL traffic comes through Cloudflare)
+services:
+  app:
+    build:
+      context: .
+    restart: unless-stopped
+    environment:
+      - SERVICE_FQDN_APP_3000
+      - DATABASE_URL=postgres://docs:${SERVICE_PASSWORD_POSTGRES}@db:5432/docs
+      - APP_SECRET=${APP_SECRET:?set APP_SECRET (64 hex characters)}
+      - SETUP_TOKEN=${SETUP_TOKEN:?set SETUP_TOKEN}
+      - COOKIE_SECURE=true
+      - TRUST_PROXY=${TRUST_PROXY:-loopback,linklocal,uniquelocal}
+      - CLIENT_IP_HEADER=${CLIENT_IP_HEADER:-}
+      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-100}
+      - DATA_DIR=/data
+    volumes:
+      - 'docs-files:/data'
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: 'postgres:16-alpine'
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=docs
+      - POSTGRES_PASSWORD=${SERVICE_PASSWORD_POSTGRES}
+      - POSTGRES_DB=docs
+    volumes:
+      - 'docs-pgdata:/var/lib/postgresql/data'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U docs -d docs']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  docs-files: null
+  docs-pgdata: null
