@@ -123,12 +123,7 @@ export function LinksList({ admin }: { admin: boolean }) {
 
   return (
     <>
-      <div className="row between">
-        <h1>Links</h1>
-        <Link to="/new">
-          <button className="primary">+ New</button>
-        </Link>
-      </div>
+      <h1>Links</h1>
       {links === null && <p className="muted">Loading…</p>}
       {links && links.length > 0 && (
         <div className="stack" style={{ marginBottom: 14 }}>

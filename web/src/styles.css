@@ -143,6 +143,9 @@ a {
   background: var(--surface);
   border-top: 1px solid var(--border);
   padding-bottom: env(safe-area-inset-bottom);
+  /* iOS home-screen apps can leave a strip below a fixed bar; let the bar color continue under it */
+  box-shadow: 0 120px 0 120px var(--surface);
+  clip-path: inset(-1px -1px -300px -1px);
 }
 .nav a {
   flex: 1;
