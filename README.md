@@ -114,4 +114,27 @@ GNU Affero General Public License v3.0 or later — see [LICENSE](LICENSE). If y
 
 ## Source tags (`?src=`)
 
-Append `?src=<tag>` to any link to tell shares apart without creating new links, e.g. `https://docs.example.com/pitchdeck?src=jane` or `?src=linkedin-post`. The tag is stored with every view and shown in the link's **Stats → Where visitors came from → Source tags**, and next to each visit. It works for password-protected links too (the tag is kept through the password step). In the panel, open a link and use **Tracked link** to build and copy the URL.
+Add `?src=<tag>` to the end of any link to tell shares apart **without creating new links**. Everyone sees the same document; the tag is only used for statistics.
+
+```
+https://docs.example.com/pitchdeck?src=jane
+https://docs.example.com/pitchdeck?src=linkedin-post
+```
+
+**Why it helps.** Messaging apps, email clients and many browsers do not send a referrer, so most visits would otherwise show up as *Direct / unknown*. A tag tells you *which* share a visit came from.
+
+**Typical uses**
+- Send the same deck to several people, each with their own tag (`?src=jane`, `?src=mark`) and compare who opened it, for how long and how far they read.
+- Use one tag per channel (`?src=email`, `?src=linkedin-post`, `?src=whatsapp-group`) to see which one works.
+
+**Where you see it**
+- *Stats → Where visitors came from → Source tags*: views and visitors per tag.
+- Next to every visit in the visit list (e.g. `Direct / unknown · jane`) and in the CSV export (`srcTag` column).
+
+**Building the URL.** Open a link in the panel and use the **Tracked link** card: type a tag, copy the finished URL.
+
+**Good to know**
+- Tags are lowercase, up to 64 characters; spaces become hyphens.
+- The tag survives the password step on password-protected links.
+- A tag identifies the *name you chose*, not the person: if the recipient forwards their tagged link, those visits count under the same tag. For per-recipient certainty use a separate link per recipient (each link also carries its own *Confidential — for <name>* stamp).
+- Tags are visible in the URL, so do not put anything sensitive in them.
