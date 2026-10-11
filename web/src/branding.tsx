@@ -17,18 +17,28 @@ const DEFAULT: Branding = { siteName: 'Docs', hasLogoDark: false, hasLogoLight: 
 const BrandingCtx = createContext<Ctx>({ ...DEFAULT, refresh: async () => {}, set: () => {} });
 export const useBranding = (): Ctx => useContext(BrandingCtx);
 
-function setFavicons(version: number): void {
+function setFavicons(version: number, hasAppIcon: boolean): void {
   document.querySelectorAll('link[data-brand-icon]').forEach((n) => n.remove());
-  for (const [variant, media] of [
-    ['light', '(prefers-color-scheme: light)'],
-    ['dark', '(prefers-color-scheme: dark)'],
-  ] as const) {
+  if (hasAppIcon) {
+    // The square app icon doubles as the browser-tab icon.
     const l = document.createElement('link');
     l.rel = 'icon';
-    l.media = media;
-    l.href = `/brand/logo/${variant}?v=${version}`;
+    l.type = 'image/png';
+    l.href = `/brand/icon/192?v=${version}`;
     l.setAttribute('data-brand-icon', '');
     document.head.appendChild(l);
+  } else {
+    for (const [variant, media] of [
+      ['light', '(prefers-color-scheme: light)'],
+      ['dark', '(prefers-color-scheme: dark)'],
+    ] as const) {
+      const l = document.createElement('link');
+      l.rel = 'icon';
+      l.media = media;
+      l.href = `/brand/logo/${variant}?v=${version}`;
+      l.setAttribute('data-brand-icon', '');
+      document.head.appendChild(l);
+    }
   }
   const a = document.createElement('link');
   a.rel = 'apple-touch-icon';
@@ -57,8 +67,8 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     document.title = b.siteName;
-    setFavicons(b.version);
-  }, [b.siteName, b.version]);
+    setFavicons(b.version, !!b.hasAppIcon);
+  }, [b.siteName, b.version, b.hasAppIcon]);
 
   if (!ready) return null;
   return <BrandingCtx.Provider value={{ ...b, refresh, set: setB }}>{children}</BrandingCtx.Provider>;

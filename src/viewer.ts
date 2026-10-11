@@ -40,8 +40,12 @@ function shell(opts: { title: string; head?: string; body: string; nonce: string
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
 <title>${esc(opts.title)}</title>
-<link rel="icon" href="/brand/logo/light?v=${getBranding().version}" media="(prefers-color-scheme: light)">
-<link rel="icon" href="/brand/logo/dark?v=${getBranding().version}" media="(prefers-color-scheme: dark)">
+${
+  getBranding().appIcon
+    ? `<link rel="icon" type="image/png" href="/brand/icon/192?v=${getBranding().version}">`
+    : `<link rel="icon" href="/brand/logo/light?v=${getBranding().version}" media="(prefers-color-scheme: light)">
+<link rel="icon" href="/brand/logo/dark?v=${getBranding().version}" media="(prefers-color-scheme: dark)">`
+}
 <link rel="apple-touch-icon" href="/brand/icon/180?v=${getBranding().version}">
 ${opts.head ?? ''}
 <style nonce="${opts.nonce}">${BASE_CSS}</style>
