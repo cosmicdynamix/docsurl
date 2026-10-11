@@ -36,7 +36,7 @@ Upload a PDF, share one link, and see who opened it, from where, for how long, h
 Requirements: Docker with Compose.
 
 ```bash
-git clone https://github.com/<you>/docsurl.git && cd docsurl
+git clone https://github.com/cosmicdynamix/docsurl.git && cd docsurl
 cp .env.example .env
 # fill in POSTGRES_PASSWORD and APP_SECRET (see the comments in .env.example)
 docker compose up -d --build
