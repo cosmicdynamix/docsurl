@@ -749,6 +749,70 @@ function AppIconCard() {
   );
 }
 
+function BackgroundCard() {
+  const { version, hasBackground, set } = useBranding();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function upload(file: File) {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      set(await apiForm<Branding>('/settings/background', fd));
+      setMsg({ ok: true, text: 'Background updated.' });
+    } catch (x) {
+      setMsg({ ok: false, text: errorMessage(x) });
+    }
+    setBusy(false);
+  }
+  async function remove() {
+    setBusy(true);
+    try {
+      set(await api<Branding>('DELETE', '/settings/background'));
+      setMsg({ ok: true, text: 'Background removed.' });
+    } catch (x) {
+      setMsg({ ok: false, text: errorMessage(x) });
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div className="card stack">
+      <h2>Background image</h2>
+      <p className="muted" style={{ margin: 0 }}>
+        Optional full-screen backdrop for the panel and for shared links. It is scaled to cover the whole screen and softened with the theme color so text stays readable. PNG, JPEG, WebP or GIF, up to 10 MB; a
+        1920 x 1080 or larger image works best.
+      </p>
+      {hasBackground && <img src={`/brand/background?v=${version}`} alt="Background preview" style={{ width: '100%', maxHeight: 180, objectFit: 'cover', borderRadius: 10 }} />}
+      {msg && <Alert kind={msg.ok ? 'ok' : 'bad'}>{msg.text}</Alert>}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void upload(f);
+          e.target.value = '';
+        }}
+      />
+      <div className="row">
+        <button className="primary" disabled={busy} onClick={() => fileRef.current?.click()}>
+          {hasBackground ? 'Replace background' : 'Upload background'}
+        </button>
+        {hasBackground && (
+          <button className="danger" disabled={busy} onClick={remove}>
+            Remove
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Settings() {
   const b = useBranding();
   const [name, setName] = useState(b.siteName);
@@ -790,6 +854,7 @@ function Settings() {
         otherHas={b.hasLogoDark}
       />
       <AppIconCard />
+      <BackgroundCard />
     </>
   );
 }

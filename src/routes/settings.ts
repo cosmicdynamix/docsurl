@@ -64,7 +64,7 @@ export const manifestShortName = (name: string): string => (name.length > 12 ? n
 
 const publicBranding = () => {
   const b = getBranding();
-  return { siteName: b.siteName, hasLogoDark: !!b.logoDark, hasLogoLight: !!b.logoLight, version: b.version, hasAppIcon: !!b.appIcon };
+  return { siteName: b.siteName, hasLogoDark: !!b.logoDark, hasLogoLight: !!b.logoLight, version: b.version, hasAppIcon: !!b.appIcon, hasBackground: !!b.bgImage };
 };
 
 export async function settingsRoutes(app: FastifyInstance): Promise<void> {
@@ -113,6 +113,17 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         theme_color: ICON_BG,
         icons,
       });
+  });
+
+  app.get('/brand/background', async (_req, reply) => {
+    const name = getBranding().bgImage;
+    if (!name) return reply.code(404).send();
+    try {
+      const body = await readFile(path.join(brandDir, name));
+      return reply.header('Content-Type', 'image/jpeg').header('X-Content-Type-Options', 'nosniff').header('Cache-Control', 'public, max-age=86400').send(body);
+    } catch {
+      return reply.code(404).send();
+    }
   });
 
   app.get('/brand/icon/:size', async (req, reply) => {
@@ -209,6 +220,43 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     for (const [s, out] of outputs) await writeFile(path.join(brandDir, iconFile(s)), out);
     await setSetting('app_icon', iconFile(512));
     await audit(req, 'settings.app_icon_uploaded', 'settings', 'app_icon');
+    return publicBranding();
+  });
+
+  app.post('/api/settings/background', { preHandler: requireAdmin }, async (req, reply) => {
+    if (!req.isMultipart()) return reply.code(400).send({ error: 'file_required' });
+    let buf: Buffer;
+    try {
+      const file = await req.file({ limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
+      if (!file) return reply.code(400).send({ error: 'file_required' });
+      buf = await file.toBuffer();
+    } catch {
+      return reply.code(413).send({ error: 'logo_too_large' });
+    }
+    let out: Buffer;
+    try {
+      const meta = await sharp(buf, { limitInputPixels: 80_000_000 }).metadata();
+      if (!meta.format || !['png', 'jpeg', 'webp', 'gif'].includes(meta.format)) return reply.code(400).send({ error: 'logo_bad_format' });
+      out = await sharp(buf, { limitInputPixels: 80_000_000 })
+        .rotate()
+        .resize({ width: 2560, height: 2560, fit: 'inside', withoutEnlargement: true })
+        .flatten({ background: ICON_BG })
+        .jpeg({ quality: 82, progressive: true })
+        .toBuffer();
+    } catch {
+      return reply.code(400).send({ error: 'logo_bad_format' });
+    }
+    await mkdir(brandDir, { recursive: true });
+    await writeFile(path.join(brandDir, 'background.jpg'), out);
+    await setSetting('bg_image', 'background.jpg');
+    await audit(req, 'settings.background_uploaded', 'settings', 'bg_image', { bytes: out.length });
+    return publicBranding();
+  });
+
+  app.delete('/api/settings/background', { preHandler: requireAdmin }, async (req) => {
+    await rm(path.join(brandDir, 'background.jpg'), { force: true });
+    await setSetting('bg_image', null);
+    await audit(req, 'settings.background_removed', 'settings', 'bg_image');
     return publicBranding();
   });
 

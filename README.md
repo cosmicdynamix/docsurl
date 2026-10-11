@@ -32,6 +32,7 @@ Upload a PDF, share one link, and see who opened it, from where, for how long, h
 - Optional **TOTP 2FA** (replay-protected), forced password change on first sign-in
 - Light/dark themes, English UI, **bring your own branding** (system name and logos are uploaded in *Settings*)
 - **Installable on a phone**: upload a square app icon in *Settings*; the panel then has a web app manifest, so "Add to Home Screen" gives it an app-style icon and full-screen launch
+- **Custom background image**: an optional full-screen backdrop (scaled to cover, softened with the theme color) for the panel and shared links, uploaded in *Settings*
 
 ## Quick start
 

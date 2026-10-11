@@ -8,12 +8,14 @@ export interface Branding {
   logoLight: string | null;
   /** Square home-screen / app icon (PNG file name), if one was uploaded. */
   appIcon: string | null;
+  /** Optional full-screen background image (JPEG file name). */
+  bgImage: string | null;
   /** Changes whenever branding changes; used to bust caches. */
   version: number;
 }
 
 export const DEFAULT_SITE_NAME = 'Docs';
-let cache: Branding = { siteName: DEFAULT_SITE_NAME, logoDark: null, logoLight: null, appIcon: null, version: 0 };
+let cache: Branding = { siteName: DEFAULT_SITE_NAME, logoDark: null, logoLight: null, appIcon: null, bgImage: null, version: 0 };
 
 export const getBranding = (): Branding => cache;
 
@@ -25,6 +27,7 @@ export async function loadBranding(): Promise<void> {
     logoDark: m.get('logo_dark')?.value ?? null,
     logoLight: m.get('logo_light')?.value ?? null,
     appIcon: m.get('app_icon')?.value ?? null,
+    bgImage: m.get('bg_image')?.value ?? null,
     version: rows.reduce((v, r) => Math.max(v, Math.floor(r.updated_at.getTime() / 1000)), 0),
   };
 }

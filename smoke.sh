@@ -359,6 +359,16 @@ ok "app icon is square (180)" "180x180" "$(curl -s $B/brand/icon/180 | docker co
 ok "public page links the touch icon" 1 "$(curl -s $B/statsdeck | grep -c 'apple-touch-icon')"
 ok "remove app icon" 200 "$(req $J DELETE /settings/app-icon)"
 ok "branding no longer reports the icon" 1 "$(curl -s $B/api/branding | grep -c '"hasAppIcon":false')"
+# --- background image ---
+ok "no background yet" 404 "$(curl -s -o /dev/null -w '%{http_code}' $B/brand/background)"
+ok "non-admin cannot upload a background" 403 "$(mp $U2 /settings/background -F file=@/tmp/cdx-icon.png)"
+ok "text file is not a background" 400 "$(mp $J /settings/background -F file=@/tmp/cdx-notimg.txt)"
+ok "upload background" 200 "$(mp $J /settings/background -F file=@/tmp/cdx-icon.png)"
+ok "branding reports the background" 1 "$(curl -s $B/api/branding | grep -c '"hasBackground":true')"
+ok "background served as JPEG" "image/jpeg" "$(curl -s -o /dev/null -w '%{content_type}' $B/brand/background)"
+ok "public page uses the background" 1 "$(curl -s $B/statsdeck | grep -c 'brand/background')"
+ok "remove background" 200 "$(req $J DELETE /settings/background)"
+ok "background gone" 404 "$(curl -s -o /dev/null -w '%{http_code}' $B/brand/background)"
 ok "logo files removed from disk" 0 "$(docker compose exec -T app sh -c 'ls /data/brand 2>/dev/null | wc -l' | tr -d '\r\n')"
 ok "restore a normal system name" 200 "$(req $J PATCH /settings '{"siteName":"Smoke Docs"}')"
 # --- hardening ---

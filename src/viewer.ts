@@ -33,6 +33,13 @@ function logos(): string {
   return `<img class="logo-d" src="/brand/logo/dark?v=${b.version}" alt=""><img class="logo-l" src="/brand/logo/light?v=${b.version}" alt="">`;
 }
 
+const bgCss = (): string => {
+  const b = getBranding();
+  if (!b.bgImage) return '';
+  const veil = 'linear-gradient(color-mix(in srgb,var(--bg) 55%,transparent),color-mix(in srgb,var(--bg) 55%,transparent))';
+  return `html{background:var(--bg)}body{background:transparent}body::before{content:'';position:fixed;inset:0;z-index:-1;background:${veil},url(/brand/background?v=${b.version}) center/cover no-repeat}`;
+};
+
 function shell(opts: { title: string; head?: string; body: string; nonce: string }): string {
   return `<!doctype html>
 <html lang="en"><head>
@@ -48,7 +55,7 @@ ${
 }
 <link rel="apple-touch-icon" href="/brand/icon/180?v=${getBranding().version}">
 ${opts.head ?? ''}
-<style nonce="${opts.nonce}">${BASE_CSS}</style>
+<style nonce="${opts.nonce}">${BASE_CSS}${bgCss()}</style>
 </head><body>${opts.body}</body></html>`;
 }
 

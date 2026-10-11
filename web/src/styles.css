@@ -36,6 +36,18 @@
 * {
   box-sizing: border-box;
 }
+html[data-bg] body {
+  background: transparent;
+}
+html[data-bg] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(color-mix(in srgb, var(--bg) 55%, transparent), color-mix(in srgb, var(--bg) 55%, transparent)),
+    var(--brand-bg) center / cover no-repeat;
+}
 html,
 body {
   margin: 0;
